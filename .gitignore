@@ -1,0 +1,26 @@
+# Local dependencies and generated output
+node_modules/
+target/
+dist/
+build/
+coverage/
+test-results/
+playwright-report/
+*.log
+*.tsbuildinfo
+
+# Local settings, credentials, and private certificates
+.codex/
+.vscode/
+.env
+.env.*
+!.env.example
+!.env.sample
+tls-private-*/
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+application-local.yml
+application-local.properties
