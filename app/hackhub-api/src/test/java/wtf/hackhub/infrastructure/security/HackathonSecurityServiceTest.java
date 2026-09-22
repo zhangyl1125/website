@@ -169,4 +169,35 @@ class HackathonSecurityServiceTest {
 
 		assertThat(service.isJudgeOrOrgManager(hackathonId, auth(userId))).isFalse();
 	}
+	@Test
+	void management_requires_platform_role_and_resource_scope() {
+		UUID user = UUID.randomUUID(), campaign = UUID.randomUUID();
+		var manager = new UsernamePasswordAuthenticationToken(user, null,
+				List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_MANAGER")));
+		when(hackathonRepository.findById(campaign)).thenReturn(Optional.of(hackathon(user, null)));
+		assertThat(service.canManage(campaign, manager)).isTrue();
+		assertThat(service.canManage(campaign, auth(user))).isFalse();
+		when(hackathonRepository.findById(campaign)).thenReturn(Optional.of(hackathon(UUID.randomUUID(), null)));
+		assertThat(service.canManage(campaign, manager)).isFalse();
+	}
+
+	@Test
+	void cross_org_view_is_denied_but_assigned_judge_can_view() {
+		UUID user = UUID.randomUUID(), campaign = UUID.randomUUID(), org = UUID.randomUUID();
+		when(hackathonRepository.findById(campaign)).thenReturn(Optional.of(hackathon(UUID.randomUUID(), org)));
+		assertThat(service.canView(campaign, auth(user))).isFalse();
+		when(judgeRepository.existsByHackathonIdAndUserId(campaign, user)).thenReturn(true);
+		assertThat(service.canView(campaign, auth(user))).isTrue();
+	}
+
+	@Test
+	void organization_members_and_authenticated_platform_campaign_viewers_are_allowed() {
+		UUID user = UUID.randomUUID(), campaign = UUID.randomUUID(), org = UUID.randomUUID();
+		when(hackathonRepository.findById(campaign)).thenReturn(Optional.of(hackathon(UUID.randomUUID(), org)));
+		when(memberRepository.existsByOrganizationIdAndUserId(org, user)).thenReturn(true);
+		assertThat(service.canView(campaign, auth(user))).isTrue();
+		when(hackathonRepository.findById(campaign)).thenReturn(Optional.of(hackathon(UUID.randomUUID(), null)));
+		assertThat(service.canView(campaign, auth(user))).isTrue();
+	}
+
 }

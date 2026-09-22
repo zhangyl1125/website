@@ -50,6 +50,7 @@ class ChatControllerTest {
 
 	@Test
 	void list_messages_returns_200() throws Exception {
+		when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
 		ChatMessage msg = new ChatMessage(TEAM_ID, USER_ID, "Hello team!", "text", null, null);
 		when(chatMessageRepository.findByTeamIdOrderByCreatedAtAsc(eq(TEAM_ID), any(Pageable.class)))
 				.thenReturn(List.of(msg));
@@ -60,12 +61,20 @@ class ChatControllerTest {
 	}
 
 	@Test
+	void non_member_is_rejected_before_reading_messages() throws Exception {
+		mvc.perform(get("/api/v1/teams/" + TEAM_ID + "/messages").with(MockAuthHelper.asParticipant(USER_ID)))
+				.andExpect(status().isForbidden());
+		org.mockito.Mockito.verifyNoInteractions(chatMessageRepository);
+	}
+
+	@Test
 	void list_messages_unauthenticated_returns_401() throws Exception {
 		mvc.perform(get("/api/v1/teams/" + TEAM_ID + "/messages")).andExpect(status().isUnauthorized());
 	}
 
 	@Test
 	void list_messages_empty_team_returns_empty_list() throws Exception {
+		when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
 		when(chatMessageRepository.findByTeamIdOrderByCreatedAtAsc(any(), any(Pageable.class))).thenReturn(List.of());
 
 		mvc.perform(get("/api/v1/teams/" + TEAM_ID + "/messages").with(MockAuthHelper.asParticipant(USER_ID)))
@@ -74,6 +83,7 @@ class ChatControllerTest {
 
 	@Test
 	void list_messages_with_page_params_returns_200() throws Exception {
+		when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
 		ChatMessage msg = new ChatMessage(TEAM_ID, USER_ID, "Paginated msg", "text", null, null);
 		when(chatMessageRepository.findByTeamIdOrderByCreatedAtAsc(eq(TEAM_ID), any(Pageable.class)))
 				.thenReturn(List.of(msg));

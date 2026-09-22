@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public interface HackathonJudgeRepository extends JpaRepository<HackathonJudge, UUID> {
 	List<HackathonJudge> findAllByHackathonId(UUID hackathonId);
+	List<HackathonJudge> findAllByUserId(UUID userId);
 	Optional<HackathonJudge> findByHackathonIdAndUserId(UUID hackathonId, UUID userId);
 	boolean existsByHackathonIdAndUserId(UUID hackathonId, UUID userId);
 	void deleteByHackathonIdAndUserId(UUID hackathonId, UUID userId);

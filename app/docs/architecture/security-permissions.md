@@ -197,34 +197,47 @@ DELETE /api/v1/ideas/:id             ADMIN | submitter
 
 ---
 
-## 7. Storage Authorization Requirements
+## 7. Storage Authorization
 
-**Current state: NOT production-ready.** Any authenticated user can upload to any bucket.
+`StorageController` calls `StorageSecurityService` before uploading or creating a
+presigned download URL. Bucket aliases and physical names resolve to the same
+policy. Missing resource context, malformed paths, and unknown buckets fail closed.
 
-**Required production state:**
+| Bucket / path | Upload | Download |
+|---|---|---|
+| avatars / `avatars/{userId}` | self or admin | self or admin |
+| team-files / `teams/{teamId}` | team member or admin | team member or admin |
+| team-avatars / `teams/{teamId}` | team leader or admin | team member or admin |
+| hackathon-assets / `banners/{hackathonId}` | campaign management permission | campaign view permission |
+| project-attachments / `projects/{teamId}` | team member or admin | team member, admin, or viewer of an associated published submission |
+| project-attachments / `nominations/{hackathonId}/{userId}` | manager uploading to their own path in an accessible campaign, or admin | uploader, admin, or viewer of the exact associated published nomination |
 
-| Bucket | Required permission |
-|--------|-------------------|
-| `hackhub-avatars` | self (own profile) or admin/org manager |
-| `hackhub-team-files` | team member |
-| `hackhub-team-avatars` | team leader or admin |
-| `hackhub-hackathon-assets` | hackathon's org owner/manager or admin |
-| `hackhub-project-attachments` | team member (submission permission) |
+Download keys append the filename to these paths. Other users cannot obtain URLs
+for draft or unreferenced nomination files. Shared attachment lookup matches the
+exact stored `storageKey`, campaign/team and uploader, rather than trusting the
+requested path alone. Existing unscoped legacy objects need an explicit migration
+before this endpoint can grant them access. Already-issued signed URLs remain
+valid until their expiry.
 
-Until context-scoped storage is implemented, storage endpoints are a known production gap.
+## 8. Page and Chat Authorization
 
----
-
-## 8. WebSocket / Chat Authorization Requirements
-
-**Current state: Partial.** HTTP endpoint has no `@PreAuthorize`. STOMP connection is authenticated but message-level scope is not fully enforced.
-
-**Required production state:**
-
-- `GET /api/v1/teams/:id/messages` — add `@PreAuthorize` requiring team membership.
-- STOMP send (`/app/team.{id}.chat`) — verify sender is team member before broadcasting.
-- STOMP subscribe (`/topic/team.{id}`) — verify subscriber is team member at connection time.
-- Non-team members must receive `403` or be silently ignored.
+- `HackathonAccess` requests `/api/v1/hackathons/{id}/access` before mounting
+  campaign edit/detail/review pages. Pending, denied or failed checks do not mount
+  the page or start its business-data requests. Account/resource changes invalidate
+  the previous decision. The API repeats authorization for each actual operation.
+- `/api/v1/profiles/me/judge-assignments` returns only the current user's assigned
+  campaign IDs. Frontend module guards do not fetch campaign details and full
+  judge directories to discover the user's permissions.
+- `GET /hackathons/{id}` checks campaign visibility before calling the detail use
+  case. Access is available to admins, platform-campaign users, the creator,
+  organization members, and assigned judges.
+- `GET /teams/{id}/messages` verifies team membership before querying messages.
+- STOMP CONNECT validates the JWT. `ResourceChannelInterceptor` then checks
+  team membership for chat SUBSCRIBE/SEND and campaign visibility for event
+  subscriptions. Unknown destinations and direct client broadcasts to the broker
+  are denied; authenticated users can subscribe to their own notification queue.
+- Explicit public endpoints in `SecurityConfig` retain their existing public
+  behavior; these are not implicitly protected by frontend login redirects.
 
 ---
 
@@ -289,8 +302,8 @@ These logs enable detection of probing, misconfigured clients, and authorization
 - [x] One team per hackathon per user enforced in backend
 - [x] Team join requires org membership (backend check)
 - [x] Idea submission requires org membership + team membership (backend check)
-- [ ] Chat `GET /teams/:id/messages` needs `@PreAuthorize`
-- [ ] STOMP message handlers need team membership validation
+- [x] Chat history checks team membership before reading messages
+- [x] STOMP chat sends and subscriptions validate team membership
 - [ ] `GET /organizations/:id` should enforce membership for non-admins
 - [ ] `GET /profiles/:id` should scope to shared org/team context
 
@@ -307,11 +320,11 @@ These logs enable detection of probing, misconfigured clients, and authorization
 - [x] Team name uniqueness per hackathon enforced
 - [x] Hackathon status transitions validated (draft→open→running→completed only)
 - [x] Criteria weight ≥ 1 enforced
-- [ ] File upload type/size validation not implemented
+- [x] File upload MIME type and size validated by the upload use case
 - [ ] URL safety validation for submission links not implemented
 
 ### Infrastructure
-- [ ] File storage is authenticated-only (not context-scoped) — production gap
+- [x] File uploads and signed URL generation enforce resource-scoped authorization
 - [ ] HTTPS required in production (Nginx/Caddy termination)
 - [ ] Rate limiting on auth endpoints not implemented
 - [ ] CORS policy should be tightened for production deployment

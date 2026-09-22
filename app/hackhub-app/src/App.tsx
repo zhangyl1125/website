@@ -7,6 +7,7 @@ import { DigitalPioneerOverview } from './pages/DigitalPioneerOverview'
 import { LandingPage } from './pages/LandingPage'
 import { useAwardAccess } from './hooks/useAwardAccess'
 import { loginDestination } from './lib/loginDestination'
+import { HackathonAccess } from './components/HackathonAccess'
 
 const AwardManagement = lazy(() => import('./pages/AwardManagement').then((module) => ({ default: module.AwardManagement })))
 const CreateHackathon = lazy(() => import('./pages/CreateHackathon'))
@@ -21,10 +22,15 @@ const Leaderboard = lazy(() => import('./pages/Leaderboard').then((module) => ({
 const AcceptInvitation = lazy(() => import('./pages/AcceptInvitation').then((module) => ({ default: module.AcceptInvitation })))
 
 function ReviewAccess({ children }: { children: ReactNode }) {
-  const { canReview, canManage, campaignIds, loading } = useAwardAccess()
-  const { hackathonId } = useParams()
+  const { hackathonId, id } = useParams()
+  if (hackathonId || id) return <HackathonAccess permission="canReview">{children}</HackathonAccess>
+  return <ReviewModuleAccess>{children}</ReviewModuleAccess>
+}
+
+function ReviewModuleAccess({ children }: { children: ReactNode }) {
+  const { canReview, loading } = useAwardAccess()
   if (loading) return <LoadingOverlay visible />
-  return (hackathonId ? canManage || campaignIds.includes(hackathonId) : canReview) ? children : <Navigate to="/projects" replace />
+  return canReview ? children : <Navigate to="/projects" replace />
 }
 
 function App() {
@@ -69,7 +75,7 @@ function App() {
     </LandingPage>
   }
 
-  const isParticipant = user.role === 'participant'
+  const isParticipant = !['admin', 'manager'].includes(user.role)
 
   return (
     <RealtimeProvider>
@@ -82,8 +88,8 @@ function App() {
             <Route path="/awards/:id" element={<ReviewAccess><AwardManagement /></ReviewAccess>} />
             <Route path="/hackathons" element={isParticipant ? <Navigate to="/" replace /> : <AwardManagement />} />
             <Route path="/hackathons/create" element={isParticipant ? <Navigate to="/" replace /> : <CreateHackathon />} />
-            <Route path="/hackathons/:id" element={isParticipant ? <Navigate to="/" replace /> : <AwardManagement />} />
-            <Route path="/hackathons/:id/edit" element={isParticipant ? <Navigate to="/" replace /> : <HackathonEdit />} />
+            <Route path="/hackathons/:id" element={isParticipant ? <Navigate to="/" replace /> : <HackathonAccess><AwardManagement /></HackathonAccess>} />
+            <Route path="/hackathons/:id/edit" element={isParticipant ? <Navigate to="/" replace /> : <HackathonAccess><HackathonEdit /></HackathonAccess>} />
             <Route path="/hackathons/:id/teams" element={<Navigate to="/projects" replace />} />
             <Route path="/organizations/:orgId/hackathons/:id/teams" element={<Navigate to="/projects" replace />} />
             <Route path="/teams" element={<Navigate to="/projects" replace />} />

@@ -14,10 +14,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 	private final JwtChannelInterceptor jwtChannelInterceptor;
 	private final AppProperties properties;
+	private final ResourceChannelInterceptor resourceChannelInterceptor;
 
-	public WebSocketConfig(JwtChannelInterceptor jwtChannelInterceptor, AppProperties properties) {
+	public WebSocketConfig(JwtChannelInterceptor jwtChannelInterceptor, AppProperties properties,
+			ResourceChannelInterceptor resourceChannelInterceptor) {
 		this.jwtChannelInterceptor = jwtChannelInterceptor;
 		this.properties = properties;
+		this.resourceChannelInterceptor = resourceChannelInterceptor;
 	}
 
 	@Override
@@ -39,6 +42,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 	@Override
 	public void configureClientInboundChannel(ChannelRegistration registration) {
 		// JWT authentication on every CONNECT frame
-		registration.interceptors(jwtChannelInterceptor);
+		registration.interceptors(jwtChannelInterceptor, resourceChannelInterceptor);
 	}
 }

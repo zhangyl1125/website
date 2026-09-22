@@ -5,11 +5,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import wtf.hackhub.application.storage.StoragePort;
 import wtf.hackhub.application.storage.UploadFileUseCase;
 import wtf.hackhub.infrastructure.config.AppProperties;
+import wtf.hackhub.infrastructure.security.StorageSecurityService;
 
 import java.util.Map;
 import java.util.Set;
@@ -25,11 +27,14 @@ public class StorageController {
 	private final UploadFileUseCase uploadFileUseCase;
 	private final StoragePort storagePort;
 	private final AppProperties properties;
+	private final StorageSecurityService security;
 
-	public StorageController(UploadFileUseCase uploadFileUseCase, StoragePort storagePort, AppProperties properties) {
+	public StorageController(UploadFileUseCase uploadFileUseCase, StoragePort storagePort, AppProperties properties,
+			StorageSecurityService security) {
 		this.uploadFileUseCase = uploadFileUseCase;
 		this.storagePort = storagePort;
 		this.properties = properties;
+		this.security = security;
 	}
 
 	@Operation(summary = "Upload a file to a storage bucket")
@@ -38,8 +43,9 @@ public class StorageController {
 			@ApiResponse(responseCode = "401", description = "Not authenticated")})
 	@PostMapping(value = "/upload/{bucketKey}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public UploadResponse upload(@PathVariable String bucketKey, @RequestParam("file") MultipartFile file,
-			@RequestParam(value = "prefix", defaultValue = "uploads") String prefix) {
+			@RequestParam("prefix") String prefix, Authentication authentication) {
 
+		security.requireAccess(logicalBucket(bucketKey), prefix, true, authentication);
 		String bucket = resolveBucket(bucketKey);
 		UploadFileUseCase.Result result = uploadFileUseCase.execute(file, bucket, prefix);
 		return new UploadResponse(result.key(), result.url());
@@ -51,21 +57,30 @@ public class StorageController {
 			@ApiResponse(responseCode = "401", description = "Not authenticated")})
 	@GetMapping("/url/{bucketKey}")
 	public Map<String, String> presignedUrl(@PathVariable String bucketKey, @RequestParam String key,
-			@RequestParam(defaultValue = "3600") int expirySeconds) {
+			@RequestParam(defaultValue = "3600") int expirySeconds, Authentication authentication) {
+		security.requireAccess(logicalBucket(bucketKey), key, false, authentication);
 		String bucket = resolveBucket(bucketKey);
 		String url = storagePort.presignedDownloadUrl(bucket, key, expirySeconds);
 		return Map.of("url", url);
 	}
 
-	private String resolveBucket(String bucketKey) {
-		// Accept either bucket alias (from AppProperties) or direct bucket name
-		Map<String, String> configured = properties.minio().buckets();
-		if (configured != null && configured.containsKey(bucketKey)) {
-			return configured.get(bucketKey);
+	private String logicalBucket(String bucketKey) {
+		// Both aliases and configured physical bucket names share the same policy.
+		for (String name : VALID_BUCKETS) {
+			String alias = name.substring("hackhub-".length());
+			String configured = properties.minio().buckets() == null
+					? name
+					: properties.minio().buckets().getOrDefault(alias, name);
+			if (bucketKey.equals(alias) || bucketKey.equals(name) || bucketKey.equals(configured))
+				return alias;
 		}
-		if (VALID_BUCKETS.contains(bucketKey))
-			return bucketKey;
 		throw new InvalidBucketException(bucketKey);
+	}
+
+	private String resolveBucket(String bucketKey) {
+		String alias = logicalBucket(bucketKey);
+		Map<String, String> configured = properties.minio().buckets();
+		return configured == null ? "hackhub-" + alias : configured.getOrDefault(alias, "hackhub-" + alias);
 	}
 
 	public record UploadResponse(String key, String url) {

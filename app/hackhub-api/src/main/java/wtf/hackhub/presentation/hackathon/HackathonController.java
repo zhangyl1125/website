@@ -68,6 +68,7 @@ public class HackathonController {
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Success"),
 			@ApiResponse(responseCode = "404", description = "Hackathon not found")})
 	@GetMapping("/{id}")
+	@PreAuthorize("@hackathonSecurity.canView(#id, authentication)")
 	public HackathonResponse getById(@PathVariable UUID id) {
 		return HackathonResponse.from(getHackathonsUseCase.getById(id));
 	}

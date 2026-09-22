@@ -41,6 +41,23 @@ public class HackathonSecurityService {
 		}).orElse(false);
 	}
 
+	public boolean canManage(UUID hackathonId, Authentication auth) {
+		return hasRole(auth, "ADMIN") || (hasRole(auth, "MANAGER") && isOwnerOrOrgManager(hackathonId, auth));
+	}
+
+	public boolean canView(UUID hackathonId, Authentication auth) {
+		UUID userId = (UUID) auth.getPrincipal();
+		return hackathonRepository.findById(hackathonId)
+				.map(h -> hasRole(auth, "ADMIN") || h.getOrganizationId() == null || userId.equals(h.getCreatedBy())
+						|| memberRepository.existsByOrganizationIdAndUserId(h.getOrganizationId(), userId)
+						|| judgeRepository.existsByHackathonIdAndUserId(hackathonId, userId))
+				.orElse(false);
+	}
+
+	private boolean hasRole(Authentication auth, String role) {
+		return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
+	}
+
 	/**
 	 * True if the caller is an assigned judge OR an owner/manager of the
 	 * hackathon's owning org. Used for scoring endpoints.

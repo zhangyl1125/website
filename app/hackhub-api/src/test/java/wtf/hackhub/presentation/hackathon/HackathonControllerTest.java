@@ -54,6 +54,9 @@ class HackathonControllerTest {
 	@MockBean
 	JwtProvider jwtProvider;
 
+	@MockBean(name = "hackathonSecurity")
+	wtf.hackhub.infrastructure.security.HackathonSecurityService security;
+
 	static final UUID USER_ID = UUID.randomUUID();
 
 	static Hackathon hackathon() {
@@ -83,7 +86,8 @@ class HackathonControllerTest {
 	@Test
 	void deleting_missing_campaign_returns_404() throws Exception {
 		UUID id = UUID.randomUUID();
-		org.mockito.Mockito.doThrow(new GetHackathonsUseCase.HackathonNotFoundException(id)).when(updateUseCase).delete(id);
+		org.mockito.Mockito.doThrow(new GetHackathonsUseCase.HackathonNotFoundException(id)).when(updateUseCase)
+				.delete(id);
 		mvc.perform(delete("/api/v1/hackathons/" + id).with(MockAuthHelper.asAdmin(USER_ID)))
 				.andExpect(status().isNotFound());
 	}
@@ -125,6 +129,7 @@ class HackathonControllerTest {
 	@Test
 	void get_by_id_returns_200() throws Exception {
 		UUID id = UUID.randomUUID();
+		when(security.canView(org.mockito.ArgumentMatchers.eq(id), any())).thenReturn(true);
 		when(getUseCase.getById(id)).thenReturn(hackathon());
 
 		mvc.perform(get("/api/v1/hackathons/" + id).with(MockAuthHelper.asManager(USER_ID))).andExpect(status().isOk())
@@ -132,12 +137,12 @@ class HackathonControllerTest {
 	}
 
 	@Test
-	void get_by_id_not_found_returns_404() throws Exception {
+	void get_by_id_inaccessible_or_missing_returns_403_before_loading() throws Exception {
 		UUID id = UUID.randomUUID();
-		when(getUseCase.getById(id)).thenThrow(new GetHackathonsUseCase.HackathonNotFoundException(id));
 
 		mvc.perform(get("/api/v1/hackathons/" + id).with(MockAuthHelper.asParticipant(USER_ID)))
-				.andExpect(status().isNotFound()).andExpect(jsonPath("$.title").value("Not Found"));
+				.andExpect(status().isForbidden());
+		org.mockito.Mockito.verifyNoInteractions(getUseCase);
 	}
 
 	// ── create ────────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import wtf.hackhub.domain.ChatMessage;
 import wtf.hackhub.infrastructure.persistence.chat.ChatMessageRepository;
@@ -33,7 +35,10 @@ public class ChatController {
 			@ApiResponse(responseCode = "404", description = "Team not found")})
 	@GetMapping
 	public List<MessageResponse> list(@PathVariable UUID teamId, @RequestParam(defaultValue = "0") int page,
-			@RequestParam(defaultValue = "50") int size) {
+			@RequestParam(defaultValue = "50") int size, @AuthenticationPrincipal UUID userId) {
+		if (!teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)) {
+			throw new AccessDeniedException("Team membership required");
+		}
 		return chatMessageRepository.findByTeamIdOrderByCreatedAtAsc(teamId, PageRequest.of(page, size)).stream()
 				.map(MessageResponse::from).toList();
 	}

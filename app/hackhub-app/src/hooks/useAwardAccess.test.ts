@@ -2,24 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useAwardAccess } from './useAwardAccess'
 
-const { state, getHackathons, getJudges } = vi.hoisted(() => ({
+const { state, getAssignments } = vi.hoisted(() => ({
   state: { user: null as { id: string; role: string } | null },
-  getHackathons: vi.fn().mockResolvedValue({ content: [{ id: 'assigned' }, { id: 'other' }] }),
-  getJudges: vi.fn(),
+  getAssignments: vi.fn(),
 }))
 vi.mock('../store/authStore', () => ({ useAuthStore: () => state }))
-vi.mock('../services/hackathonService', () => ({ HackathonService: { getHackathons } }))
-vi.mock('../services/judgingService', () => ({ JudgingService: { getJudges } }))
+vi.mock('../lib/apiClient', () => ({ api: { get: getAssignments } }))
 beforeEach(() => {
   vi.clearAllMocks()
   state.user = null
-  getJudges.mockResolvedValue([])
+  getAssignments.mockResolvedValue([])
 })
 describe('award review access', () => {
   it('does not request protected data for visitors', () => {
     const { result } = renderHook(useAwardAccess)
     expect(result.current.canReview).toBe(false)
-    expect(getHackathons).not.toHaveBeenCalled()
+    expect(getAssignments).not.toHaveBeenCalled()
   })
   it('does not grant committee access to an ordinary participant', async () => {
     state.user = { id: 'ordinary', role: 'participant' }
@@ -29,7 +27,7 @@ describe('award review access', () => {
   })
   it('grants assigned judges access only to their campaigns and clears it on account change', async () => {
     state.user = { id: 'judge', role: 'participant' }
-    getJudges.mockImplementation(async (id) => id === 'assigned' ? [{ userId: 'judge' }] : [])
+    getAssignments.mockResolvedValueOnce(['assigned'])
     const { result, rerender } = renderHook(useAwardAccess)
     await waitFor(() => expect(result.current.canReview).toBe(true))
     expect(result.current.campaignIds).toEqual(['assigned'])

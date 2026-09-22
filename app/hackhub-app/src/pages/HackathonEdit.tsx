@@ -29,7 +29,6 @@ import { useForm } from '@mantine/form'
 import { useAuthStore } from '../store/authStore'
 import { HackathonService } from '../services/hackathonService'
 import { useHackathonStore } from '../store/hackathonStore'
-import { PermissionService } from '../utils/permissions'
 import { notifications } from '@mantine/notifications'
 
 interface HackathonEditForm {
@@ -105,17 +104,6 @@ export function HackathonEdit() {
             color: 'red',
           })
           navigate('/hackathons')
-          return
-        }
-
-        // Check permissions
-        if (!user || !PermissionService.canEditHackathon(user, foundHackathon)) {
-          notifications.show({
-            title: 'Access Denied',
-            message: 'You do not have permission to edit this award campaign.',
-            color: 'red',
-          })
-          navigate(`/awards/${id}`)
           return
         }
 
