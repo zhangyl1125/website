@@ -38,17 +38,6 @@ function App() {
     }
   }, [initialized, initialize])
 
-  // Public website sections share the landing background and original page components.
-  if (['/', '/overview', '/nominate', '/projects'].includes(location.pathname)) {
-    return <LandingPage>
-      <Suspense fallback={<LoadingOverlay visible />}>
-        {location.pathname === '/nominate' ? <ProjectShowcase nominationMode />
-          : location.pathname === '/projects' ? <ProjectShowcase />
-          : <DigitalPioneerOverview />}
-      </Suspense>
-    </LandingPage>
-  }
-
   // Keep the login form mounted while submitting so failed attempts retain their input.
   if (!initialized || (loading && location.pathname !== '/login')) {
     return <LoadingOverlay visible />
@@ -58,15 +47,26 @@ function App() {
     return (
       <Suspense fallback={<LoadingOverlay visible />}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/organization/setup" element={<Navigate to="/" replace />} />
+          <Route path="/organization/setup" element={<Navigate to="/login" replace />} />
           <Route path="/invite/:token" element={<AcceptInvitation />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />} />
         </Routes>
       </Suspense>
     )
+  }
+
+  // Website sections share the original layout after authentication.
+  if (['/', '/overview', '/nominate', '/projects'].includes(location.pathname)) {
+    return <LandingPage>
+      <Suspense fallback={<LoadingOverlay visible />}>
+        {location.pathname === '/nominate' ? <ProjectShowcase nominationMode />
+          : location.pathname === '/projects' ? <ProjectShowcase />
+          : <DigitalPioneerOverview />}
+      </Suspense>
+    </LandingPage>
   }
 
   const isParticipant = user.role === 'participant'
