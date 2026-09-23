@@ -56,3 +56,8 @@ coverage/
 *.zip
 *.sql
 *.dump
+
+# Database schema and migration source files
+!/app/hackhub-api/src/main/resources/db/migration/
+!/app/hackhub-api/src/main/resources/db/migration/**
+!/app/infra/postgres/init.sql
