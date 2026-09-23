@@ -46,7 +46,7 @@ FROM nginx:1.27-alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 # nginx.conf lives alongside this Dockerfile in the app/ build context
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=644 nginx.conf /etc/nginx/conf.d/default.conf
 
 RUN addgroup -S hackhub && adduser -S hackhub -G hackhub \
     && chown -R hackhub:hackhub /usr/share/nginx/html \
