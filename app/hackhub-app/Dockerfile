@@ -19,7 +19,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 
 WORKDIR /app
 
-COPY package*.json .npmrc ./
+COPY package*.json ./
 RUN --mount=type=secret,id=corporate-ca,required=false \
     normalize_proxy() { \
       printf '%s' "$1" | sed \
