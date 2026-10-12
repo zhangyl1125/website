@@ -1041,6 +1041,11 @@
   opacity: 1;
 }
 
+.dp-nomination-flow > .dp-form-shell .dp-bilingual-input::placeholder {
+  color: rgb(255 255 255 / 60%);
+  font-size: 0.75rem;
+}
+
 .dp-nomination-flow > .dp-form-shell :where(.mantine-Input-section, .mantine-InputPlaceholder-placeholder, .mantine-Badge-label) {
   color: #ffffff;
 }
@@ -1386,6 +1391,16 @@
 
 .dp-management-page .dp-form-shell {
   margin-top: 0;
+}
+
+.dp-management-page .dp-primary-button,
+.dp-management-page .dp-primary-button:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+.dp-judge-shell {
+  background: #fff;
 }
 
 

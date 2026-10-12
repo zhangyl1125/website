@@ -20,6 +20,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class GetIdeasUseCaseTest {
@@ -62,4 +65,21 @@ class GetIdeasUseCaseTest {
 
 		assertThatThrownBy(() -> useCase.getById(id)).isInstanceOf(VoteIdeaUseCase.IdeaNotFoundException.class);
 	}
+	@Test
+	void reads_vote_state_once_for_the_requested_page_and_user() {
+		UUID user = UUID.randomUUID(), first = UUID.randomUUID(), second = UUID.randomUUID();
+		var ids = List.of(first, second);
+		when(voteRepository.findVotedIdeaIds(user, ids)).thenReturn(List.of(second));
+		assertThat(useCase.votedIdeaIds(ids, user)).containsExactly(second);
+		verify(voteRepository).findVotedIdeaIds(user, ids);
+		verifyNoMoreInteractions(voteRepository);
+	}
+
+	@Test
+	void anonymous_and_empty_pages_do_not_query_votes() {
+		assertThat(useCase.votedIdeaIds(List.of(), UUID.randomUUID())).isEmpty();
+		assertThat(useCase.votedIdeaIds(List.of(UUID.randomUUID()), null)).isEmpty();
+		verifyNoInteractions(voteRepository);
+	}
+
 }

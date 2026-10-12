@@ -43,12 +43,14 @@ export function Leaderboard({ hackathonId: propHackathonId }: LeaderboardProps =
         queryClient.invalidateQueries({ queryKey: [key, hackathonId] }),
       ))
     }
+    let timer: ReturnType<typeof setTimeout> | undefined
     const unsubscribe = subscribeToHackathonUpdates(hackathonId, (event) => {
-      if (event.event === 'JUDGE_SCORES_UPDATED') refreshScores()
+      if (event.event !== 'JUDGE_SCORES_UPDATED' || timer !== undefined) return
+      timer = setTimeout(() => { timer = undefined; refreshScores() }, 150)
     })
     // Recover any updates missed while connecting or reconnecting.
     refreshScores()
-    return () => { unsubscribe?.() }
+    return () => { clearTimeout(timer); unsubscribe?.() }
   }, [hackathonId, canManage, isConnected, subscribeToHackathonUpdates, queryClient])
   const [category, setCategory] = useState<string | null>(null)
   const [expandedIdeas, setExpandedIdeas] = useState<Set<string>>(() => new Set())
@@ -58,11 +60,11 @@ export function Leaderboard({ hackathonId: propHackathonId }: LeaderboardProps =
     else next.add(ideaId)
     return next
   })
-  const summary = useQuery({ queryKey: ['score-summary', hackathonId], queryFn: () => JudgingService.getScoreSummary(hackathonId!), enabled: Boolean(hackathonId && canManage), staleTime: 30000, refetchInterval: 30000 })
-  const ideas = useQuery({ queryKey: ['leaderboard-ideas', hackathonId], queryFn: () => loadAllNominations(hackathonId!), enabled: Boolean(hackathonId && canManage), staleTime: 60000 })
-  const details = useQuery({ queryKey: ['all-judge-scores', hackathonId], queryFn: () => JudgingService.getAllScores(hackathonId!), enabled: Boolean(hackathonId && canManage), refetchInterval: 30000 })
-  const judges = useQuery({ queryKey: ['hackathon-judges', hackathonId], queryFn: () => JudgingService.getJudges(hackathonId!), enabled: Boolean(hackathonId && canManage) })
-  const criteria = useQuery({ queryKey: ['voting-criteria', hackathonId], queryFn: () => VotingService.getCriteria(hackathonId!), enabled: Boolean(hackathonId && canManage) })
+  const summary = useQuery({ queryKey: ['score-summary', hackathonId, user?.id], queryFn: () => JudgingService.getScoreSummary(hackathonId!), enabled: Boolean(hackathonId && canManage), staleTime: 30000, refetchInterval: 30000 })
+  const ideas = useQuery({ queryKey: ['judging-ideas', hackathonId, user?.id], queryFn: () => loadAllNominations(hackathonId!), enabled: Boolean(hackathonId && canManage), staleTime: 60000 })
+  const details = useQuery({ queryKey: ['all-judge-scores', hackathonId], queryFn: () => JudgingService.getAllScores(hackathonId!), enabled: Boolean(hackathonId && canManage && expandedIdeas.size), refetchInterval: 30000 })
+  const judges = useQuery({ queryKey: ['hackathon-judges', hackathonId], queryFn: () => JudgingService.getJudges(hackathonId!), enabled: Boolean(hackathonId && canManage && expandedIdeas.size) })
+  const criteria = useQuery({ queryKey: ['voting-criteria', hackathonId], queryFn: () => VotingService.getCriteria(hackathonId!), enabled: Boolean(hackathonId && canManage && expandedIdeas.size) })
   const nominations = new Map((ideas.data ?? []).map((idea) => [idea.id, {
     ...idea, category: normalizeDigitalPioneerTrack(idea.category, idea.tags ?? []),
   }]))

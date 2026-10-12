@@ -6,6 +6,7 @@ import {
   ActionIcon,
   Alert,
   Badge,
+  Box,
   Button,
   Card,
   Center,
@@ -13,6 +14,7 @@ import {
   Grid,
   Group,
   Loader,
+  Modal,
   Progress,
   Select,
   NumberInput,
@@ -22,6 +24,7 @@ import {
   ThemeIcon,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core'
 import {
   IconAlertCircle,
@@ -38,7 +41,8 @@ import { DIGITAL_PIONEER_RECOMMENDATIONS, DIGITAL_PIONEER_RUBRIC, DIGITAL_PIONEE
 import { useAuthStore } from '../store/authStore'
 import { loadAllNominations, officialCriteria, savedEvaluation } from '../utils/committeeScoring'
 import type { JudgeScore } from '../services/judgingService'
-import type { Idea } from '../services/ideaService'
+import type { Idea, ProjectAttachment } from '../services/ideaService'
+import { StorageService } from '../services/storageService'
 import { JudgingService } from '../services/judgingService'
 import { VotingService } from '../services/votingService'
 import type { VotingCriteria } from '../services/votingService'
@@ -80,6 +84,53 @@ function matchingRubric(criterion: VotingCriteria, index: number) {
   return DIGITAL_PIONEER_RUBRIC[Math.min(index, DIGITAL_PIONEER_RUBRIC.length - 1)]
 }
 
+function isImageAttachment(attachment: ProjectAttachment): boolean {
+  return attachment.type !== 'nomination' && (attachment.type === 'screenshot'
+    || /\.(png|jpe?g|webp|gif|avif|bmp)(?:[?#]|$)/i.test(attachment.name || attachment.storageKey || attachment.url))
+}
+
+function JudgingImage({ attachment }: { attachment: ProjectAttachment }) {
+  const [opened, setOpened] = useState(false)
+  const [imageError, setImageError] = useState(false)
+  const { data: url, isError, isFetching, refetch } = useQuery({
+    queryKey: ['judging-image', attachment.storageKey, attachment.url],
+    queryFn: async () => {
+      if (attachment.storageKey) return StorageService.getPresignedUrl('project-attachments', attachment.storageKey)
+      if (/^https?:\/\//i.test(attachment.url) || attachment.url.startsWith('/storage/')) return attachment.url
+      throw new Error('Unable to load attachment.')
+    },
+    staleTime: 50 * 60 * 1000,
+    refetchInterval: 50 * 60 * 1000,
+  })
+  const failed = isError || imageError
+
+  return <>
+    <UnstyledButton
+      aria-label={failed ? 'Retry image' : `Preview ${attachment.name || 'image'}`}
+      onClick={() => {
+        if (failed) { setImageError(false); void refetch() }
+        else if (url) setOpened(true)
+      }}
+      disabled={isFetching && !url}
+      w={96} h={112}
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden', background: 'transparent', border: 0, borderRadius: 0 }}
+    >
+      {failed ? <Text size="xs" ta="center">Unable to load image. Retry</Text> : url ? (
+        <img src={url} alt={attachment.name || 'Nomination image'} width={96} height={112}
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setImageError(true)} />
+      ) : <Loader size="sm" />}
+    </UnstyledButton>
+    <Modal opened={opened} onClose={() => setOpened(false)} centered size="auto" title={attachment.name || 'Image preview'}
+      closeButtonProps={{ 'aria-label': 'Close image preview' }} styles={{
+        content: { maxWidth: 'calc(100vw - 32px)', background: 'transparent', boxShadow: 'none' },
+        header: { background: 'transparent' },
+      }}>
+      {url && <img src={url} alt={attachment.name || 'Nomination image'}
+        style={{ display: 'block', maxWidth: '100%', maxHeight: '75dvh', objectFit: 'contain', margin: '0 auto' }} />}
+    </Modal>
+  </>
+}
+
 interface IdeaJudgingCardProps {
   idea: Idea
   criteria: VotingCriteria[]
@@ -103,6 +154,7 @@ function IdeaJudgingCard({
 }: IdeaJudgingCardProps): ReactElement {
   const { language } = useLanguage()
   const nominee = idea.projectAttachments?.find((attachment) => attachment.type === 'nomination')
+  const images = (idea.projectAttachments ?? []).filter(isImageAttachment)
   const saved = savedEvaluation(savedScores)
   const [scores, setScores] = useState<IdeaScores>(() =>
     Object.fromEntries(criteria.map((criterion) => [criterion.id, saved.scores[criterion.id] ?? '']))
@@ -122,45 +174,55 @@ function IdeaJudgingCard({
   return (
     <Card className="dp-judge-shell" p={{ base: 'lg', md: 32 }}>
       <Grid gutter={{ base: 24, md: 38 }}>
-        <Grid.Col span={{ base: 12, lg: 4 }}>
-          <Stack gap="md" h="100%">
-            <Group justify="space-between" align="flex-start">
-              <Badge variant="light" color="grape">{idea.category}</Badge>
-              {alreadyScored ? (
-                <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>Recorded</Badge>
-              ) : null}
-            </Group>
-            <div>
-              <Title order={3}>{idea.title}</Title>
-              <Text size="sm" c="dimmed" mt="sm" style={{ whiteSpace: 'pre-line' }}>
-                {idea.description}
-              </Text>
-            </div>
-            <div className="dp-fieldset">
-              <Text size="sm"><b>Nominee:</b> {nominee?.name ?? 'Not provided'}</Text>
-              <Text size="sm"><b>Org. code:</b> {nominee?.nomineeOrgCode ?? 'Not provided'}</Text>
-              <Text size="sm"><b>Position:</b> {nominee?.nomineePosition ?? 'Not provided'}</Text>
-              <Text size="sm"><b>Nominating HoD:</b> {nominee?.nominatingHead ?? 'Not provided'}</Text>
-            </div>
-            <Group gap="xs">
-              {idea.tags.slice(0, 4).map((tag) => <Badge key={tag} size="sm" variant="outline">{tag}</Badge>)}
-            </Group>
-            <Stack gap="xs" mt="auto">
-              {(idea.projectAttachments ?? []).filter((attachment) => attachment.type !== 'nomination').map((attachment) => (
-                <NominationEvidence key={attachment.storageKey || attachment.url} attachment={attachment} />
-              ))}
-              {idea.repositoryUrl ? (
-                <Button component="a" href={idea.repositoryUrl} target="_blank" variant="light" rightSection={<IconExternalLink size={15} />}>
-                  Review evidence
-                </Button>
-              ) : null}
-              {idea.demoUrl ? (
-                <Button component="a" href={idea.demoUrl} target="_blank" variant="subtle" rightSection={<IconExternalLink size={15} />}>
-                  Open demo
-                </Button>
-              ) : null}
+        <Grid.Col span={{ base: 12, lg: 4 }} style={{ display: 'flex', minWidth: 0 }}>
+          <Box pos="relative" w="100%" mih={{ base: 540, lg: 0 }}>
+            <Stack gap="md" pos="absolute" top={0} bottom={0} left={0} right={0}>
+              <Group align="flex-start" wrap="nowrap" gap="sm" style={{ flexShrink: 0 }}>
+                <Stack gap="md" style={{ flex: 1, minWidth: 0, maxHeight: images.length ? 112 : undefined, overflowY: 'auto', overflowWrap: 'anywhere' }}>
+                  <Group gap="xs">
+                    <Badge variant="light" color="grape">{idea.category}</Badge>
+                    {alreadyScored ? (
+                      <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>Recorded</Badge>
+                    ) : null}
+                  </Group>
+                  <Title order={3}>{idea.title}</Title>
+                </Stack>
+                {images.length > 0 && <Stack gap="xs" w={96} h={112} style={{ flexShrink: 0, overflowY: 'auto' }}>
+                  {images.map((attachment) => <JudgingImage key={attachment.storageKey || attachment.url} attachment={attachment} />)}
+                </Stack>}
+              </Group>
+              <Stack gap="md" tabIndex={0} aria-label="Nomination details"
+                style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowWrap: 'anywhere', paddingRight: 8 }}>
+                <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-line' }}>
+                  {idea.description}
+                </Text>
+                <div className="dp-fieldset">
+                  <Text size="sm"><b>Nominee:</b> {nominee?.name ?? 'Not provided'}</Text>
+                  <Text size="sm"><b>Org. code:</b> {nominee?.nomineeOrgCode ?? 'Not provided'}</Text>
+                  <Text size="sm"><b>Position:</b> {nominee?.nomineePosition ?? 'Not provided'}</Text>
+                  <Text size="sm"><b>Nominating HoD:</b> {nominee?.nominatingHead ?? 'Not provided'}</Text>
+                </div>
+                <Group gap="xs">
+                  {idea.tags.slice(0, 4).map((tag) => <Badge key={tag} size="sm" variant="outline">{tag}</Badge>)}
+                </Group>
+                <Stack gap="xs" mt="auto">
+                  {(idea.projectAttachments ?? []).filter((attachment) => attachment.type !== 'nomination' && !isImageAttachment(attachment)).map((attachment) => (
+                    <NominationEvidence key={attachment.storageKey || attachment.url} attachment={attachment} />
+                  ))}
+                  {idea.repositoryUrl ? (
+                    <Button component="a" href={idea.repositoryUrl} target="_blank" variant="light" rightSection={<IconExternalLink size={15} />}>
+                      Review evidence
+                    </Button>
+                  ) : null}
+                  {idea.demoUrl ? (
+                    <Button component="a" href={idea.demoUrl} target="_blank" variant="subtle" rightSection={<IconExternalLink size={15} />}>
+                      Open demo
+                    </Button>
+                  ) : null}
+                </Stack>
+              </Stack>
             </Stack>
-          </Stack>
+          </Box>
         </Grid.Col>
 
         <Grid.Col span={{ base: 12, lg: 8 }}>
@@ -322,7 +384,7 @@ export function JudgingPanel(): ReactElement {
     staleTime: 5 * 60 * 1000,
   })
   const { data: nominations, isLoading: ideasLoading, error: ideasError } = useQuery({
-    queryKey: ['judging-ideas', hackathonId],
+    queryKey: ['judging-ideas', hackathonId, user?.id],
     queryFn: () => loadAllNominations(hackathonId!),
     enabled: Boolean(hackathonId && canJudge),
     staleTime: 2 * 60 * 1000,
@@ -354,21 +416,19 @@ export function JudgingPanel(): ReactElement {
       const note = [`Recommendation: ${submission.recommendation}`, submission.comment.trim()]
         .filter(Boolean)
         .join('\n\n')
-      await JudgingService.submitEvaluation(hackathonId!, {
+      const saved = await JudgingService.submitEvaluation(hackathonId!, {
         ideaId: submission.ideaId,
         scores: Object.entries(submission.scores).map(([criterionId, score]) => ({ criterionId, score: Number(score) })),
         comment: note,
       })
-      return submission.ideaId
+      return { ideaId: submission.ideaId, saved }
     },
-    onSuccess: async () => {
+    onSuccess: ({ ideaId, saved }) => {
+      queryClient.setQueryData<JudgeScore[]>(['my-judge-scores', hackathonId], (current = []) =>
+        [...current.filter((score) => score.ideaId !== ideaId), ...saved])
       setSubmittingIdea(null)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['my-judge-scores', hackathonId] }),
-        queryClient.invalidateQueries({ queryKey: ['judging-ideas', hackathonId] }),
-        queryClient.invalidateQueries({ queryKey: ['score-summary', hackathonId] }),
-        queryClient.invalidateQueries({ queryKey: ['all-judge-scores', hackathonId] }),
-      ])
+      void Promise.all(['score-summary', 'all-judge-scores'].map((key) =>
+        queryClient.invalidateQueries({ queryKey: [key, hackathonId] })))
       notifications.show({
         title: 'Rating recorded',
         message: 'The weighted total and committee ranking have been updated.',
@@ -387,8 +447,10 @@ export function JudgingPanel(): ReactElement {
 
   const deleteRatingMutation = useMutation({
     mutationFn: (ideaId: string) => JudgingService.deleteEvaluation(hackathonId!, ideaId),
-    onSuccess: async () => {
-      await Promise.all(['my-judge-scores', 'judging-ideas', 'score-summary', 'all-judge-scores'].map((key) =>
+    onSuccess: (_, ideaId) => {
+      queryClient.setQueryData<JudgeScore[]>(['my-judge-scores', hackathonId], (current = []) =>
+        current.filter((score) => score.ideaId !== ideaId))
+      void Promise.all(['score-summary', 'all-judge-scores'].map((key) =>
         queryClient.invalidateQueries({ queryKey: [key, hackathonId] })))
       setSubmittingIdea(null)
       notifications.show({ title: 'Rating deleted', message: 'The weighted total and committee ranking have been updated.', color: 'teal' })
@@ -443,9 +505,6 @@ export function JudgingPanel(): ReactElement {
               <Text className="dp-section-label" style={{ marginBottom: 0 }}>2026 Digital Pioneer · Committee</Text>
             </Group>
             <h1 className="dp-section-title">Committee scoring</h1>
-            <Text className="dp-section-copy" mt="md">
-              Review the nomination evidence, score both criteria with whole numbers, and record a recommendation. Totals use the official 70/30 weighting.
-            </Text>
           </div>
           {canManageJudging ? <Tooltip label="Open committee ranking">
             <Button
@@ -459,7 +518,7 @@ export function JudgingPanel(): ReactElement {
           </Tooltip> : null}
         </Group>
 
-        {!isAssignedJudge ? <Alert color="blue">You have manager access to review nominations. Assign yourself as a committee member in award settings to submit ratings.</Alert> : null}
+        {!isAssignedJudge ? <Alert styles={{ root: { backgroundColor: 'rgba(255, 255, 255, 0.12)' }, message: { color: '#fff' } }}>You have manager access to review nominations. Assign yourself as a committee member in award settings to submit ratings.</Alert> : null}
         <Card className="dp-rules-panel" p="lg">
           <Grid align="center">
             <Grid.Col span={{ base: 12, sm: 4 }}>
@@ -497,7 +556,7 @@ export function JudgingPanel(): ReactElement {
         ) : null}
         {!isLoading && !error && criteriaReady ? tracks.map((track) => (
           <Stack key={track.value} gap="md" component="section" aria-label={track.label}>
-            <Text component="h2" size="xl" fw={800} m={0} c="white">{track.label} · {track.labelZh}</Text>
+            <Text component="h2" size="xl" fw={800} m={0} c="white">{track.label}</Text>
             {track.ideas.length === 0 ? (
               <Text c="white">No nominations in this category yet.</Text>
             ) : track.ideas.map((idea) => (

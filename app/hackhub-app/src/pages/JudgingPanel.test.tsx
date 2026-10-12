@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { JudgingPanel } from './JudgingPanel'
+import { IdeaService } from '../services/ideaService'
 
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
 vi.mock('../contexts/LanguageContext', () => ({ useLanguage: () => ({ language: 'en' }) }))
@@ -18,9 +19,9 @@ vi.mock('../store/authStore', () => ({ useAuthStore: () => ({ user: mocks.user }
 vi.mock('@mantine/notifications', () => ({ notifications: { show: mocks.notify } }))
 vi.mock('../services/judgingService', () => ({ JudgingService: mocks }))
 vi.mock('../services/votingService', () => ({ VotingService: { getCriteria: mocks.getCriteria, applyAwardTemplate: mocks.applyAwardTemplate } }))
-vi.mock('../services/ideaService', () => ({ IdeaService: { getIdeas: async () => ({ content: [
+vi.mock('../services/ideaService', () => ({ IdeaService: { getIdeas: vi.fn(async () => ({ content: [
   { id: 'case-1', title: 'Customer value case', description: 'Measured impact', category: 'Customer Values', tags: [], status: 'submitted' },
-], totalPages: 1 }) } }))
+], totalPages: 1 })) } }))
 
 function show() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -40,6 +41,10 @@ beforeEach(() => {
 
 it('requires explicit scores and submits the Excel example as one complete evaluation', async () => {
   const user = userEvent.setup()
+  mocks.submitEvaluation.mockResolvedValue([
+    { id: 'saved-b', ideaId: 'case-1', judgeId: 'judge-1', criterionId: 'behavior', score: 8, comment: 'Recommendation: Recommend' },
+    { id: 'saved-i', ideaId: 'case-1', judgeId: 'judge-1', criterionId: 'impact', score: 5, comment: 'Recommendation: Recommend' },
+  ])
   show()
   const submit = await screen.findByRole('button', { name: 'Submit rating' })
   expect(submit).toBeDisabled()
@@ -56,6 +61,9 @@ it('requires explicit scores and submits the Excel example as one complete evalu
     ideaId: 'case-1', scores: [{ criterionId: 'behavior', score: 8 }, { criterionId: 'impact', score: 5 }],
     comment: 'Recommendation: Recommend\n\nVerified outcome',
   }))
+  await screen.findByRole('button', { name: 'Delete rating' })
+  expect(IdeaService.getIdeas).toHaveBeenCalledTimes(1)
+  expect(mocks.getMyScores).toHaveBeenCalledTimes(1)
 })
 
 it('leaves partial historical evaluations incomplete and restores the saved value', async () => {

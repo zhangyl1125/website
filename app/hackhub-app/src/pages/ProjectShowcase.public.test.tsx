@@ -1,9 +1,16 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render as renderView, screen, fireEvent } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectShowcase } from './ProjectShowcase'
+
+const render = (ui: ReactElement) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
 
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
 Element.prototype.scrollIntoView = vi.fn()

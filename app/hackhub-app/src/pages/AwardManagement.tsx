@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { Alert, Badge, Button, Card, Container, Group, Modal, TextInput, Select, Stack, Table, Text, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useAuthStore } from '../store/authStore'
 import { HackathonService, type Hackathon } from '../services/hackathonService'
-import { JudgingService, type HackathonJudge, type ScoreSummary } from '../services/judgingService'
+import { JudgingService, type HackathonJudge } from '../services/judgingService'
 import { OrganizationService } from '../services/organizationService'
 import { getAllPages } from '../services/pagination'
 import { api } from '../lib/apiClient'
@@ -13,25 +14,40 @@ import { VotingCriteriaManager } from '../components/VotingCriteriaManager'
 import { useLanguage } from '../contexts/LanguageContext'
 import { translateUiText } from '../contexts/uiTranslations'
 import { loadAllNominations, rankCommitteeScores } from '../utils/committeeScoring'
-import type { Idea } from '../services/ideaService'
 import './DigitalPioneer.css'
 
 function AwardVotingResults({ hackathonId }: { hackathonId: string }) {
   const { language } = useLanguage()
-  const [results, setResults] = useState<{ nominations: Idea[]; scores: ScoreSummary[] } | null>(null)
-  const [error, setError] = useState('')
-
+  const { user } = useAuthStore()
+  const container = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
   useEffect(() => {
-    let active = true
-    setResults(null)
-    setError('')
-    void Promise.all([loadAllNominations(hackathonId), JudgingService.getScoreSummary(hackathonId)])
-      .then(([nominations, scores]) => { if (active) setResults({ nominations, scores }) })
-      .catch(() => { if (active) setError(language === 'zh' ? '无法加载投票结果，请刷新重试。' : 'Unable to load voting results. Please refresh and try again.') })
-    return () => { active = false }
-  }, [hackathonId, language])
+    if (!container.current) return
+    if (typeof IntersectionObserver === 'undefined') { setVisible(true); return }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible(true)
+        observer.disconnect()
+      }
+    }, { rootMargin: '300px' })
+    observer.observe(container.current)
+    return () => observer.disconnect()
+  }, [])
+  const nominations = useQuery({
+    queryKey: ['judging-ideas', hackathonId, user?.id],
+    queryFn: () => loadAllNominations(hackathonId),
+    enabled: visible, staleTime: 60000,
+  })
+  const scores = useQuery({
+    queryKey: ['score-summary', hackathonId, user?.id],
+    queryFn: () => JudgingService.getScoreSummary(hackathonId),
+    enabled: visible, staleTime: 30000,
+  })
+  const results = nominations.data && scores.data ? { nominations: nominations.data, scores: scores.data } : null
+  const error = nominations.error || scores.error
+    ? (language === 'zh' ? '无法加载投票结果，请刷新重试。' : 'Unable to load voting results. Please refresh and try again.') : ''
 
-  return <Card className="dp-form-shell" p={{ base: 'lg', md: 32 }}>
+  return <Card ref={container} className="dp-form-shell" p={{ base: 'lg', md: 32 }}>
     <Title order={3}>{language === 'zh' ? '各赛道投票结果' : 'Voting results by category'}</Title>
     {error ? <Alert mt="md" color="red">{error}</Alert> : !results ? <Text mt="md" role="status">{language === 'zh' ? '正在加载投票结果…' : 'Loading voting results…'}</Text> : (
       <Stack mt="lg" gap="xl">
@@ -39,7 +55,7 @@ function AwardVotingResults({ hackathonId }: { hackathonId: string }) {
           const nominationIds = new Set(results.nominations.filter((idea) => normalizeDigitalPioneerTrack(idea.category, idea.tags ?? []) === track.value).map((idea) => idea.id))
           const rows = rankCommitteeScores(results.scores.filter((score) => nominationIds.has(score.ideaId)))
           return <Stack key={track.value} gap="sm" component="section" aria-label={`${track.label} voting results`}>
-            <Title order={4}>{track.label} · {track.labelZh}</Title>
+            <Title order={4}>{track.label}</Title>
             {!rows.length ? <Text>{language === 'zh' ? '该赛道暂无提名。' : 'No nominations in this category yet.'}</Text> : (
               <Table.ScrollContainer minWidth={520} type="native"><Table>
                 <Table.Thead><Table.Tr><Table.Th>Nomination</Table.Th><Table.Th>Associate votes</Table.Th><Table.Th>Committee total</Table.Th><Table.Th>Completed judges</Table.Th></Table.Tr></Table.Thead>
@@ -63,7 +79,7 @@ export function AwardManagement() {
   const { language } = useLanguage()
   const [campaigns, setCampaigns] = useState<Hackathon[]>([])
   const [judges, setJudges] = useState<HackathonJudge[]>([])
-  const [members, setMembers] = useState<Array<{ value: string; label: string }>>([])
+  const [membersOpened, setMembersOpened] = useState(false)
   const [invitee, setInvitee] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -79,14 +95,17 @@ export function AwardManagement() {
       setLoading(true)
       setError('')
       try {
-        const campaigns = await getAllPages((page) => HackathonService.getHackathons(page, 100))
-        const assignments = await Promise.all(campaigns.map(async (item) => ({
-          campaign: item,
-          judges: await JudgingService.getJudges(item.id),
-        })))
+        const [campaigns, assignedIds] = await Promise.all([
+          getAllPages((page) => HackathonService.getHackathons(page, 100)),
+          canManage ? Promise.resolve(null) : api.get<string[]>('/api/v1/profiles/me/judge-assignments'),
+        ])
+        const assigned = new Set(assignedIds ?? [])
+        const judges = canManage && id && campaigns.some((item) => item.id === id)
+          ? await JudgingService.getJudges(id)
+          : []
         if (!active) return
-        setCampaigns(assignments.filter((item) => canManage || item.judges.some((judge) => judge.userId === user?.id)).map((item) => item.campaign))
-        setJudges(assignments.find((item) => item.campaign.id === id)?.judges ?? [])
+        setCampaigns(campaigns.filter((item) => canManage || assigned.has(item.id)))
+        setJudges(judges)
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : 'Unable to load award campaigns.')
       } finally {
@@ -97,24 +116,19 @@ export function AwardManagement() {
     return () => { active = false }
   }, [id, user?.id, canManage])
 
-  useEffect(() => {
-    if (!canManage || !id) return
-    let active = true
-    const loadMembers = async () => {
-      try {
-        const options = user?.role === 'admin'
-          ? (await getAllPages((page) => api.get<{ content: Array<{ id: string; name: string; email: string }>; totalPages?: number }>(`/api/v1/admin/users?page=${page}&size=200&sort=name,asc`))).map((member) => ({ value: member.id, label: `${member.name} (${member.email})` }))
-          : (await Promise.all((await OrganizationService.getMyOrganizations()).map(async (org) =>
-              (await OrganizationService.getMembers(org.id)).map((member) => ({ value: member.userId, label: `${member.name ?? member.email} (${member.email ?? ''})` }))
-            ))).flat()
-        if (active) setMembers([...new Map(options.map((option) => [option.value, option])).values()])
-      } catch {
-        if (active) setError('Unable to load associates for committee assignment. Refresh to retry.')
-      }
-    }
-    void loadMembers()
-    return () => { active = false }
-  }, [canManage, id, user?.role])
+  const { data: members = [], error: membersError } = useQuery({
+    queryKey: ['committee-member-options', user?.id, user?.role],
+    enabled: Boolean(canManage && id && membersOpened),
+    staleTime: 60000,
+    queryFn: async () => {
+      const options = user?.role === 'admin'
+        ? (await getAllPages((page) => api.get<{ content: Array<{ id: string; name: string; email: string }>; totalPages?: number }>(`/api/v1/admin/users?page=${page}&size=200&sort=name,asc`))).map((member) => ({ value: member.id, label: `${member.name} (${member.email})` }))
+        : (await Promise.all((await OrganizationService.getMyOrganizations()).map(async (org) =>
+            (await OrganizationService.getMembers(org.id)).map((member) => ({ value: member.userId, label: `${member.name ?? member.email} (${member.email ?? ''})` }))
+          ))).flat()
+      return [...new Map(options.map((option) => [option.value, option])).values()]
+    },
+  })
 
   const mutate = async (operation: () => Promise<void>) => {
     setBusy(true)
@@ -162,17 +176,26 @@ export function AwardManagement() {
         {error && <Alert color="red" role="alert">{error}</Alert>}
         {loading ? <Text role="status">Loading award campaigns…</Text> : !id ? (
           visibleCampaigns.length ? visibleCampaigns.map((item) => (
-            <Card key={item.id} className="dp-form-shell" p={{ base: 'lg', md: 32 }}>
-              <Group justify="space-between">
-                <div><Title order={3}>{canManage ? <Link className="dp-award-title-link" to={`/awards/${item.id}`}>{item.title}</Link> : item.title}</Title><Text c="white" mt="xs">{new Date(item.startDate).toLocaleDateString()} – {new Date(item.endDate).toLocaleDateString()}</Text></div>
-                <Badge>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</Badge>
-              </Group>
-              <Group mt="lg">
-                <Button component={Link} to={`/hackathons/${item.id}/judge`}>Committee scoring</Button>
-                {canManage && <Button component={Link} to={`/hackathons/${item.id}/leaderboard`} variant="light">Scores & rankings</Button>}
-                {isAdmin && <Button variant="subtle" color="red" c="#ffb1b1" onClick={() => requestDelete(item)}>Delete award</Button>}
-              </Group>
-            </Card>
+            <Stack key={item.id} gap="xl">
+              <Card className="dp-form-shell" p={{ base: 'lg', md: 32 }}>
+                <Group justify="space-between">
+                  <div><Title order={3}>{canManage ? <Link className="dp-award-title-link" to={`/awards/${item.id}`}>{item.title}</Link> : item.title}</Title><Text c="white" mt="xs">{canManage ? item.description : `${new Date(item.startDate).toLocaleDateString()} – ${new Date(item.endDate).toLocaleDateString()}`}</Text></div>
+                  <Badge>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</Badge>
+                </Group>
+                <Group mt="lg">
+                  <Button component={Link} to={`/hackathons/${item.id}/judge`}>Committee scoring</Button>
+                  {canManage && <Button component={Link} to={`/hackathons/${item.id}/leaderboard`} variant="light">Scores & rankings</Button>}
+                  {isAdmin && <Button variant="subtle" color="red" c="#ffb1b1" onClick={() => requestDelete(item)}>Delete award</Button>}
+                </Group>
+                {canManage && <Select mt="lg" maw={520} size="md" label="Campaign status" description="Running campaigns accept associate votes; completed campaigns close voting." value={item.status} disabled={busy}
+                  data={[{ value: 'draft', label: 'Draft' }, { value: 'open', label: 'Open' }, { value: 'running', label: 'Running' }, { value: 'completed', label: 'Completed' }].map((option) => ({ ...option, label: language === 'zh' ? translateUiText(option.label) : option.label }))}
+                  onChange={(value) => { if (value) void mutate(async () => {
+                    const updated = await HackathonService.transitionStatus(item.id, value as Hackathon['status'])
+                    setCampaigns((current) => current.map((item) => item.id === updated.id ? updated : item))
+                  }) }} />}
+              </Card>
+              {canManage && <AwardVotingResults hackathonId={item.id} />}
+            </Stack>
           )) : <Text>No award campaigns are available{canManage ? '.' : ' for your committee account.'}</Text>
         ) : !campaign ? <Alert color="orange">This award campaign is unavailable.</Alert> : (
           <>
@@ -195,12 +218,13 @@ export function AwardManagement() {
             {canManage && <Card className="dp-form-shell" p={{ base: 'lg', md: 32 }}>
               <Title order={3}>Committee members</Title>
               <Stack mt="md">
+                {membersError && <Alert color="red">Unable to load associates for committee assignment. Refresh to retry.</Alert>}
                 {judges.map((judge) => <Group key={judge.id} justify="space-between">
                   <Text>{judge.name ?? judge.userId} · {judge.email}</Text>
                   <Button size="sm" variant="subtle" color="red" disabled={busy} onClick={() => void mutate(async () => { await JudgingService.removeJudge(campaign.id, judge.userId); setJudges((current) => current.filter((item) => item.userId !== judge.userId)) })}>Remove</Button>
                 </Group>)}
                 {!judges.length && <Text c="white">No committee members assigned yet.</Text>}
-                <Select size="md" label="Assign an associate" searchable value={invitee} onChange={setInvitee} data={members.filter((member) => !judges.some((judge) => judge.userId === member.value))} />
+                <Select size="md" label="Assign an associate" searchable onDropdownOpen={() => setMembersOpened(true)} value={invitee} onChange={setInvitee} data={members.filter((member) => !judges.some((judge) => judge.userId === member.value))} />
                 <Button w="fit-content" loading={busy} disabled={!invitee} onClick={() => void mutate(async () => { if (!invitee) return; const added = await JudgingService.inviteJudge(campaign.id, invitee); setJudges((current) => [...current, added]); setInvitee(null) })}>Assign committee member</Button>
               </Stack>
             </Card>}

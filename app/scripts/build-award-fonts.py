@@ -15,4 +15,12 @@ for weight in ['Regular','Bold']:
     sub=subset.Subsetter(options=options); sub.populate(unicodes=chars); sub.subset(font)
     font.flavor='woff2'; path=root/'public/fonts'/('award-sans-'+weight.lower()+'.woff2');font.save(path)
     print(path.name,path.stat().st_size)
+    # English copy and loading punctuation share a small subset; other glyphs retain the full font.
+    latin=TTFont(path)
+    latin_subset=subset.Subsetter(options=options)
+    latin_subset.populate(unicodes=set(range(0x250)) | set(range(0x2000,0x2070)))
+    latin_subset.subset(latin)
+    latin_path=path.with_name('award-sans-'+weight.lower()+'-latin.woff2')
+    latin.save(latin_path)
+    print(latin_path.name,latin_path.stat().st_size)
 (root/'public/fonts/LICENSE.txt').write_text(Path('/usr/share/doc/fonts-noto-cjk/copyright').read_text())

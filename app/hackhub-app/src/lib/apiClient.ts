@@ -85,7 +85,19 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return response.json()
 }
 
+let refreshInFlight: Promise<boolean> | null = null
+
 async function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = refreshSession()
+  try {
+    return await refreshInFlight
+  } finally {
+    refreshInFlight = null
+  }
+}
+
+async function refreshSession(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE_URL}/api/v1/auth/refresh`, {
       method: 'POST',

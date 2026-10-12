@@ -21,7 +21,7 @@ describe('DigitalPioneerOverview', () => {
     expect(screen.getAllByText('客户价值').length).toBeGreaterThan(0)
     expect(screen.getAllByText('创新破局').length).toBeGreaterThan(0)
     expect(screen.getAllByText('协作共赢').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('link', { name: '开始报名' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('link', { name: 'Start a nomination' }).length).toBeGreaterThan(0)
     expect(screen.getByText('Oct. 19–30')).toBeInTheDocument()
   })
 })

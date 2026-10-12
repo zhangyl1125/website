@@ -56,7 +56,7 @@ describe('Login', () => {
 
   it('renders email input', () => {
     renderLogin()
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /^email/i })).toBeInTheDocument()
   })
 
   it('renders password input', () => {
@@ -78,16 +78,16 @@ describe('Login', () => {
     mockLogin.mockResolvedValueOnce(undefined)
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'aah5sgh@bosch.com' },
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), {
+      target: { value: 'test.user@example.invalid' },
     })
     fireEvent.change(screen.getByLabelText(/password/i), {
-      target: { value: 'aah5sgh@bosch.com' },
+      target: { value: 'test.user@example.invalid' },
     })
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
 
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith('aah5sgh@bosch.com', 'aah5sgh@bosch.com')
+      expect(mockLogin).toHaveBeenCalledWith('test.user@example.invalid', 'test.user@example.invalid')
     })
   })
 
@@ -95,11 +95,11 @@ describe('Login', () => {
     mockLogin.mockResolvedValueOnce(undefined)
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'aah5sgh@bosch.com' },
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), {
+      target: { value: 'test.user@example.invalid' },
     })
     fireEvent.change(screen.getByLabelText(/password/i), {
-      target: { value: 'aah5sgh@bosch.com' },
+      target: { value: 'test.user@example.invalid' },
     })
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
 
@@ -112,11 +112,11 @@ describe('Login', () => {
     mockLogin.mockResolvedValueOnce(undefined)
     renderLogin('/login?redirect=/nominate')
 
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'aah5sgh@bosch.com' },
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), {
+      target: { value: 'test.user@example.invalid' },
     })
     fireEvent.change(screen.getByLabelText(/password/i), {
-      target: { value: 'aah5sgh@bosch.com' },
+      target: { value: 'test.user@example.invalid' },
     })
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
 
@@ -129,7 +129,7 @@ describe('Login', () => {
     mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'))
     renderLogin()
 
-    fireEvent.change(screen.getByLabelText(/email/i), {
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), {
       target: { value: 'bad@test.com' },
     })
     fireEvent.change(screen.getByLabelText(/password/i), {
@@ -147,7 +147,7 @@ describe('Login', () => {
     'uses the overview for an invalid or public redirect: %s', async (redirect) => {
       mockLogin.mockResolvedValueOnce(undefined)
       renderLogin(`/login?redirect=${encodeURIComponent(redirect)}`)
-      fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'user@test.com' } })
+      fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), { target: { value: 'user@test.com' } })
       fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'password123' } })
       fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
       await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/overview', { replace: true }))
@@ -156,14 +156,14 @@ describe('Login', () => {
 
   it('supports browser credential autofill', () => {
     renderLogin()
-    expect(screen.getByLabelText(/email/i)).toHaveAttribute('autocomplete', 'username')
+    expect(screen.getByRole('textbox', { name: /^email/i })).toHaveAttribute('autocomplete', 'username')
     expect(screen.getByLabelText(/password/i)).toHaveAttribute('autocomplete', 'current-password')
   })
 
   it('remembers only the email after a successful opt-in and restores it on return', async () => {
     mockLogin.mockResolvedValueOnce(undefined)
     const view = renderLogin()
-    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'user@test.com' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), { target: { value: 'user@test.com' } })
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'private-password' } })
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
@@ -172,7 +172,7 @@ describe('Login', () => {
     expect(JSON.stringify(localStorage)).not.toContain('private-password')
     view.unmount()
     renderLogin()
-    expect(screen.getByLabelText(/email/i)).toHaveValue('user@test.com')
+    expect(screen.getByRole('textbox', { name: /^email/i })).toHaveValue('user@test.com')
     expect(screen.getByLabelText(/password/i)).toHaveValue('')
     expect(screen.getByRole('checkbox')).toBeChecked()
     fireEvent.click(screen.getByRole('checkbox'))
@@ -182,7 +182,7 @@ describe('Login', () => {
   it('does not remember an email without consent or when authentication fails', async () => {
     mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'))
     renderLogin()
-    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'user@test.com' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), { target: { value: 'user@test.com' } })
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'wrong-password' } })
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
@@ -197,7 +197,7 @@ describe('Login', () => {
 
   it('shows validation error for invalid email format', async () => {
     renderLogin()
-    fireEvent.change(screen.getByLabelText(/email/i), {
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), {
       target: { value: 'not-an-email' },
     })
     fireEvent.change(screen.getByLabelText(/password/i), {
@@ -213,7 +213,7 @@ describe('Login', () => {
 
   it('shows validation error for short password', async () => {
     renderLogin()
-    fireEvent.change(screen.getByLabelText(/email/i), {
+    fireEvent.change(screen.getByRole('textbox', { name: /^email/i }), {
       target: { value: 'user@test.com' },
     })
     fireEvent.change(screen.getByLabelText(/password/i), {

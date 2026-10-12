@@ -9,6 +9,8 @@ import wtf.hackhub.infrastructure.persistence.idea.IdeaRepository;
 import wtf.hackhub.infrastructure.persistence.idea.IdeaVoteRepository;
 
 import java.util.UUID;
+import java.util.List;
+import java.util.Set;
 
 @Service
 public class GetIdeasUseCase {
@@ -29,6 +31,12 @@ public class GetIdeasUseCase {
 	@Transactional(readOnly = true)
 	public Idea getById(UUID id) {
 		return ideaRepository.findById(id).orElseThrow(() -> new VoteIdeaUseCase.IdeaNotFoundException(id));
+	}
+
+	@Transactional(readOnly = true)
+	public Set<UUID> votedIdeaIds(List<UUID> ideaIds, UUID userId) {
+		if (userId == null || ideaIds.isEmpty()) return Set.of();
+		return Set.copyOf(voteRepository.findVotedIdeaIds(userId, ideaIds));
 	}
 
 	@Transactional(readOnly = true)

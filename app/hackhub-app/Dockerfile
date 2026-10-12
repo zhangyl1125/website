@@ -37,7 +37,7 @@ RUN --mount=type=secret,id=corporate-ca,required=false \
       cp /run/secrets/corporate-ca /usr/local/share/ca-certificates/corporate-proxy-ca.crt && \
       update-ca-certificates; \
     fi && \
-    npm ci --frozen-lockfile
+    npm ci
 
 COPY . .
 RUN npm run build

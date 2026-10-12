@@ -163,3 +163,23 @@ it('resubscribes and retrieves missed scores after reconnecting', async () => {
   await screen.findByRole('button', { name: '8.00' })
   expect(mocks.subscribe).toHaveBeenCalledTimes(2)
 })
+
+it('does not fetch individual ratings until a row is expanded', async () => {
+  show()
+  const row = (await screen.findByText('Value nominee')).closest('tr')!
+  expect(mocks.getAllScores).not.toHaveBeenCalled()
+  await userEvent.click(within(row).getByRole('button', { name: 'View ratings' }))
+  await waitFor(() => expect(mocks.getAllScores).toHaveBeenCalledTimes(1))
+})
+
+it('coalesces a burst of rating notifications into one refresh', async () => {
+  show()
+  await screen.findByText('Value nominee')
+  const before = mocks.getScoreSummary.mock.calls.length
+  const onUpdate = mocks.subscribe.mock.calls[0][1] as (event: HackathonEvent) => void
+  act(() => {
+    for (let i = 0; i < 5; i++) onUpdate({ event: 'JUDGE_SCORES_UPDATED', ideaId: 'value' })
+  })
+  await waitFor(() => expect(mocks.getScoreSummary).toHaveBeenCalledTimes(before + 1))
+  expect(mocks.getAllScores).not.toHaveBeenCalled()
+})

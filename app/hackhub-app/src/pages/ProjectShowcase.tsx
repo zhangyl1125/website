@@ -20,6 +20,7 @@ import {
   Alert,
   Image,
   FileInput,
+  Input,
   Textarea,
   UnstyledButton,
   Checkbox,
@@ -43,6 +44,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -165,6 +167,48 @@ function readVotingCart(userId: string | undefined): { userId: string | undefine
   }
 }
 
+function NomineePhoto({ src, name }: { src: string; name: string }) {
+  const container = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    if (!container.current) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    // Limit preloading to the next row instead of downloading every original photo.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible(true)
+        observer.disconnect()
+      }
+    }, { rootMargin: '300px' })
+    observer.observe(container.current)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <div ref={container} className="dp-candidate-photo" style={{ position: 'relative' }}>
+      {visible && <Image key={attempt} src={src} alt={`${name} nomination`} fit="contain"
+        decoding="async" w="100%" h="100%"
+        onLoad={() => setStatus('loaded')} onError={() => setStatus('error')}
+        style={{ visibility: status === 'loaded' ? 'visible' : 'hidden' }} />}
+      {status !== 'loaded' && <Stack gap="xs" align="center" justify="center"
+        style={{ position: 'absolute', inset: 0 }}>
+        <IconUser size={24} aria-hidden="true" />
+        <Text size="sm" role="status">{status === 'error' ? 'Photo unavailable' : 'Loading photo…'}</Text>
+        {status === 'error' && <Button size="compact-xs" variant="subtle" onClick={() => {
+          setStatus('loading')
+          setAttempt((current) => current + 1)
+        }}>Retry photo</Button>}
+      </Stack>}
+    </div>
+  )
+}
+
 function usePhotoUrl(file: File | null) {
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
@@ -218,9 +262,10 @@ function PersonalPhotoCrop({ file, language, onConfirm, onClose }: {
         (dimensions.height * scale / 2 - height / 2 - y) / scale,
         width / scale, height / scale, 0, 0, canvas.width, canvas.height)
       const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((result) => result ? resolve(result) : reject(new Error('Crop failed')), 'image/png')
+        canvas.toBlob((result) => result ? resolve(result) : reject(new Error('Crop failed')), 'image/webp', 0.85)
       })
-      onConfirm(new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-cropped.png`, { type: 'image/png' }))
+      const extension = blob.type === 'image/webp' ? 'webp' : 'png'
+      onConfirm(new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-cropped.${extension}`, { type: blob.type }))
     } catch {
       setError(true)
     } finally {
@@ -284,6 +329,7 @@ function PersonalPhotoCrop({ file, language, onConfirm, onClose }: {
 
 export function ProjectShowcase({ nominationMode = false, managementMode = false }: { nominationMode?: boolean; managementMode?: boolean }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { user } = useAuthStore()
   const { language } = useLanguage()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -369,6 +415,7 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
         // Share requests within this refresh only, so votes and account changes stay fresh.
         const profiles = new Map<string, ReturnType<typeof ProfileService.getProfile>>()
         const imageUrls = new Map<string, Promise<string>>()
+        const imageUpdates: Array<Promise<{ id: string; images: string[] }>> = []
         const getProfile = (id: string) => {
           let request = profiles.get(id)
           if (!request) {
@@ -415,11 +462,10 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
             }))
             const screenshots = (idea.projectAttachments ?? [])
               .filter((attachment) => attachment.type === 'screenshot')
-            const images = await Promise.all(screenshots.map(async (attachment) => {
-              if (!attachment.storageKey) return attachment.url
-              return getImageUrl(attachment.storageKey)
-                .catch(() => attachment.url)
-            }))
+            const images = screenshots.map((attachment) => attachment.url)
+            imageUpdates.push(Promise.all(screenshots.map((attachment) =>
+              attachment.storageKey ? getImageUrl(attachment.storageKey).catch(() => attachment.url) : attachment.url,
+            )).then((resolved) => ({ id: idea.id, images: [...resolved, ...(idea.attachments ?? [])].filter(Boolean) })))
 
             const creatorProfile = teamMembers.length > 0 || nomination?.name != null
               ? null
@@ -437,7 +483,8 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
               technologies: parseNominationTags((idea.tags ?? []).join(',')),
               github_url: idea.repositoryUrl ?? undefined,
               demo_url: idea.demoUrl ?? undefined,
-              images: [...images, ...(idea.attachments ?? [])].filter(Boolean),
+              images: screenshots.some((attachment) => attachment.storageKey)
+                ? [] : [...images, ...(idea.attachments ?? [])].filter(Boolean),
               votes: idea.votes ?? 0,
               user_vote: idea.userHasVoted ?? false,
               status: idea.status,
@@ -450,6 +497,13 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
         }))
         if (sequence !== loadSequence.current) return
         setProjects(hackathonData.flatMap(({ projectList }) => projectList))
+        // Photo URL requests must not hold the nomination list or voting controls open.
+        void Promise.all(imageUpdates).then((updates) => {
+          if (sequence !== loadSequence.current) return
+          const imagesById = new Map(updates.map((update) => [update.id, update.images]))
+          setProjects((current) => current.map((project) => ({ ...project, images: imagesById.get(project.id) ?? project.images })))
+          setSelectedProject((current) => current ? { ...current, images: imagesById.get(current.id) ?? current.images } : null)
+        })
       } catch (error) {
         if (sequence !== loadSequence.current) return
         setLoadError(true)
@@ -629,6 +683,25 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
     })
   }
 
+  const refreshVoteState = async (ids: string[], sequence: number) => {
+    const awardIds = [...new Set(projects.filter((project) => ids.includes(project.id)).map((project) => project.hackathon_id))]
+    for (const awardId of awardIds) {
+      void queryClient.invalidateQueries({ queryKey: ['score-summary', awardId] })
+      void queryClient.invalidateQueries({ queryKey: ['judging-ideas', awardId], refetchType: 'none' })
+    }
+    try {
+      const pages = await Promise.all(awardIds.map((awardId) => getAllPages((page) => IdeaService.getIdeas(awardId, page, 100))))
+      if (sequence !== loadSequence.current) return
+      const votes = new Map(pages.flat().map((idea) => [idea.id, { votes: idea.votes ?? 0, user_vote: idea.userHasVoted ?? false }]))
+      setProjects((current) => current.map((project) => ({ ...project, ...votes.get(project.id) })))
+      setSelectedProject((current) => current ? { ...current, ...votes.get(current.id) } : null)
+    } catch {
+      if (sequence === loadSequence.current) notifications.show({
+        title: 'Votes saved', message: 'Unable to refresh the latest totals. Refresh the page to retry.', color: 'orange',
+      })
+    }
+  }
+
   const submitCart = async () => {
     if (!user || ballotBusy.current || loading || loadError) return
     const ids = projects.filter((project) => cartIds.has(project.id) && !project.user_vote).map((project) => project.id)
@@ -654,7 +727,7 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
       if (sequence !== loadSequence.current) return
       setSubmissionState('idle')
       showVotingRecords()
-      await loadProjects()
+      await refreshVoteState(ids, sequence)
     } catch (error) {
       if (sequence !== loadSequence.current) return
       const message = error instanceof ApiError && error.status === 401
@@ -686,7 +759,7 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
         ? { ...project, user_vote: false, votes: Math.max(0, project.votes - 1) } : project)
       setCart((current) => ({ ...current, ids: current.ids.filter((item) => item !== id) }))
       setRecordToDelete(null)
-      await loadProjects()
+      await refreshVoteState([id], sequence)
     } catch (error) {
       if (sequence !== loadSequence.current) return
       setRecordError(error instanceof Error ? error.message : 'Unable to delete your voting record. Please try again.')
@@ -856,16 +929,12 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
           ) : (
             <Card className="dp-form-shell" p={{ base: 'lg', md: 38 }}>
               <Stack gap={0} id="nomination-form">
-                  <Group className="dp-form-intro" justify="space-between" align="center" wrap="wrap">
-                    <div>
-                      <Title order={3}>{selectedNominationTrack.label}</Title>
-                    </div>
-                    {photoPreview && <Image src={photoPreview} alt={language === 'zh' ? '个人照片预览' : 'Personal photo preview'}
-                      w={120} h={160} fit="contain" radius="sm" style={{ marginLeft: 'auto' }} />}
-                  </Group>
                   <div className="dp-fieldset" translate="no" style={{ borderTop: 0, paddingTop: 0 }}>
                     <Grid gutter="md">
                       <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <div className="dp-form-intro">
+                          <Title order={3}>{selectedNominationTrack.label}</Title>
+                        </div>
                         {!user || user.role === 'participant' ? (
                           <TextInput label="Outlook Name" value={user?.name ?? ''} readOnly />
                         ) : (
@@ -879,16 +948,27 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                           />
                         )}
                         {nomineeLoadError && <Text size="sm" c="red" role="alert">Unable to load associates. Refresh to retry; self-nomination is still available.</Text>}
+                        <Input.Label id="personal-photo-label" htmlFor="personal-photo" required mt="xs">
+                          <strong>Personal Photo</strong><span style={{ fontWeight: 400 }}>(JG, PNG or WebP; up to 50 MB per photo)</span>
+                        </Input.Label>
                       </Grid.Col>
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                      <Grid.Col span={{ base: 12, sm: 6 }} pr={{ base: 'md', sm: 80 }} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start' }}>
                         <FileInput
-                          label={<><strong>Personal Photo</strong><span style={{ fontWeight: 400 }}>(JG, PNG or WebP; up to 50 MB per photo)</span></>}
-                          styles={{ label: { whiteSpace: 'nowrap' } }}
+                          id="personal-photo"
+                          aria-labelledby="personal-photo-label"
+                          w={150}
+                          styles={{
+                            input: { height: 192, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+                            section: { top: 4, bottom: 'auto', height: 28 },
+                          }}
+                          placeholder={<IconPhoto size={28} />}
+                          valueComponent={() => photoPreview ? (
+                            <Image src={photoPreview} alt={language === 'zh' ? '个人照片预览' : 'Personal photo preview'}
+                              w="100%" h={190} fit="contain" radius="sm" />
+                          ) : <Text size="sm" p="xs" lineClamp={3}>{projectImage?.name}</Text>}
                           required
                           accept={PHOTO_ACCEPT}
                           error={photoError ? (language === 'zh' ? (projectImage?.size === 0 ? '照片为空，请重新选择。' : projectImage && projectImage.size > MAX_UPLOAD_BYTES ? '照片超过 50 MB，请选择较小的图片。' : '请选择 JPG、PNG 或 WebP 格式的照片。') : photoError) : null}
-                          leftSection={<IconPhoto size={16} />}
-                          leftSectionPointerEvents="none"
                           value={projectImage}
                           onChange={(file) => {
                             if (!file || validatePersonalPhoto(file)) setProjectImage(file)
@@ -923,6 +1003,8 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                           required
                           minRows={4}
                           maxLength={1200}
+                          placeholder="中英文输入都可"
+                          classNames={{ input: 'dp-bilingual-input' }}
                           value={uploadForm.executiveSummary}
                           onChange={(event) => setUploadForm((current) => ({ ...current, executiveSummary: event.target.value }))}
                         />
@@ -938,6 +1020,8 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                           required
                           minRows={4}
                           maxLength={2400}
+                          placeholder="中英文输入都可"
+                          classNames={{ input: 'dp-bilingual-input' }}
                           value={uploadForm.achievementImpact}
                           onChange={(event) => setUploadForm((current) => ({ ...current, achievementImpact: event.target.value }))}
                         />
@@ -953,6 +1037,8 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                           required
                           minRows={4}
                           maxLength={2000}
+                          placeholder="中英文输入都可"
+                          classNames={{ input: 'dp-bilingual-input' }}
                           value={uploadForm.cultureDemonstration}
                           onChange={(event) => setUploadForm((current) => ({ ...current, cultureDemonstration: event.target.value }))}
                         />
@@ -964,9 +1050,11 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                     <div className="dp-nomination-question">
                       <div style={{ minWidth: 0 }}>
                         <TextInput
-                          label={<><span className="dp-question-number" aria-hidden="true">04</span><span>Tags you want to add(Add up to 5 tags, separated by 、, ， or commas (,))</span></>}
+                          label={<><span className="dp-question-number" aria-hidden="true">04</span><span>Tags you want to add(Add up to 5 tags: 、 , ，)</span></>}
                           styles={{ label: { whiteSpace: 'nowrap' } }}
                           error={tooManyTags ? tagHint : undefined}
+                          placeholder="中英文输入都可"
+                          classNames={{ input: 'dp-bilingual-input' }}
                           value={uploadForm.technologies}
                           onChange={(event) => setUploadForm((current) => ({ ...current, technologies: event.target.value }))}
                         />
@@ -978,7 +1066,6 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                     </div>
                   </div>
 
-                  {!canNominate && <Text size="sm" c="dimmed">{language === 'zh' ? '仅管理员和评选管理者可提交报名。' : 'Only administrators and award managers can submit nominations.'}</Text>}
                   <Group justify="flex-end" align="center" pt="lg">
                     <Button
                       className="dp-primary-button"
@@ -1016,7 +1103,6 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
             <li>{language === 'zh' ? '每人每赛道最多4票，各赛道独立计算；每位候选人最多1票，再次点击即可取消。' : 'Up to 4 votes per person per category. Each nominee receives at most one of your votes; add your selections to the cart, then click Submit.'}</li>
             <li>{language === 'zh' ? '本部门最多2票，其他部门合计最多2票；两组额度独立，均可投0、1或2票。' : 'Up to 2 votes for your department and up to 2 votes in total for other departments. Each allowance is independent and may be used for 0, 1 or 2 votes.'}</li>
             <li>{language === 'zh' ? '每赛道可投0–4票，无需投满；投票和撤票均不限制先后顺序。' : 'You may cast 0–4 votes per category. You do not have to use all votes, and may submit or delete voting records in any order.'}</li>
-            <li>{language === 'zh' ? '投票账号和候选人须能唯一匹配BD名册，部门按Org.code中“-”前的部分识别，例如BD/DPA-SRE3属于BD/DPA。' : 'Voters and nominees must uniquely match the BD roster. Department is the Org.code prefix before “-”, e.g. BD/DPA-SRE3 belongs to BD/DPA.'}</li>
           </ul>
         </details>}
 
@@ -1119,12 +1205,7 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                 <div className="dp-candidate-layout">
                   <div className="dp-card-visual">
                     {project.images[0] ? (
-                      <Image
-                        src={project.images[0]}
-                        alt={`${project.nominee_name} nomination`}
-                        className="dp-candidate-photo"
-                        fit="contain"
-                      />
+                      <NomineePhoto key={project.images[0]} src={project.images[0]} name={project.nominee_name} />
                     ) : (
                       <div className="dp-nominee-placeholder">
                         <IconUser size={24} />
@@ -1466,6 +1547,7 @@ export function ProjectShowcase({ nominationMode = false, managementMode = false
                   src={selectedProject.images[0]}
                   alt={`${selectedProject.nominee_name} nomination`}
                   className="dp-candidate-detail-photo"
+                  decoding="async"
                   radius="md"
                   fit="contain"
                 />

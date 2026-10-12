@@ -76,6 +76,21 @@ class IdeaControllerTest {
 	}
 
 	@Test
+	void list_ideas_uses_batched_votes_without_per_idea_queries() throws Exception {
+		Idea first = idea(), second = idea();
+		UUID secondId = UUID.randomUUID();
+		org.springframework.test.util.ReflectionTestUtils.setField(first, "id", IDEA_ID);
+		org.springframework.test.util.ReflectionTestUtils.setField(second, "id", secondId);
+		when(getIdeasUseCase.listByHackathon(any(), any())).thenReturn(new PageImpl<>(List.of(first, second)));
+		when(getIdeasUseCase.votedIdeaIds(List.of(IDEA_ID, secondId), USER_ID)).thenReturn(java.util.Set.of(secondId));
+		mvc.perform(get("/api/v1/hackathons/" + HACKATHON_ID + "/ideas").with(MockAuthHelper.asParticipant(USER_ID)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.content[0].userHasVoted").value(false))
+				.andExpect(jsonPath("$.content[1].userHasVoted").value(true));
+		verify(getIdeasUseCase).votedIdeaIds(List.of(IDEA_ID, secondId), USER_ID);
+		verify(getIdeasUseCase, never()).hasVoted(any(), any());
+	}
+
+	@Test
 	void list_ideas_returns_page() throws Exception {
 		when(getIdeasUseCase.listByHackathon(any(), any())).thenReturn(new PageImpl<>(List.of(idea())));
 		mvc.perform(get("/api/v1/hackathons/" + HACKATHON_ID + "/ideas").with(MockAuthHelper.asParticipant(USER_ID)))

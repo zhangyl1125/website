@@ -64,6 +64,11 @@ public class GetJudgeScoresUseCase {
 				.collect(Collectors.groupingBy(JudgeScore::getIdeaId));
 
 		List<VotingCriteria> criteria = criteriaRepository.findAllByHackathonIdOrderByDisplayOrder(hackathonId);
+		var communityByIdea = ideaScoreRepository.summarizeByHackathon(hackathonId).stream()
+				.collect(Collectors.toMap(IdeaScoreRepository.CommunitySummary::getIdeaId, summary -> summary));
+		var teamIds = ideas.stream().map(Idea::getTeamId).filter(java.util.Objects::nonNull).distinct().toList();
+		Map<UUID, String> teamNames = teamIds.isEmpty() ? Map.of() : teamRepository.findAllById(teamIds).stream()
+				.collect(Collectors.toMap(Team::getId, Team::getName));
 		int panelWeight = hackathon.getPanelWeight();
 		int communityWeight = 100 - panelWeight;
 
@@ -74,8 +79,9 @@ public class GetJudgeScoresUseCase {
 			int judgeCount = completedJudgeCount(panelScores, criteria);
 			BigDecimal panelScore = judgeCount == 0 ? null : weightedPanelScore(panelScores, criteria);
 
-			int communityVoterCount = ideaScoreRepository.countDistinctVoters(idea.getId());
-			BigDecimal communityScore = ideaScoreRepository.calculateWeightedScore(idea.getId(), hackathonId);
+			var community = communityByIdea.get(idea.getId());
+			int communityVoterCount = community == null ? 0 : community.getVoterCount();
+			BigDecimal communityScore = community == null ? BigDecimal.ZERO : community.getWeightedScore();
 
 			BigDecimal blendedScore = switch (hackathon.getJudgingMode()) {
 				case PANEL -> panelScore;
@@ -89,7 +95,7 @@ public class GetJudgeScoresUseCase {
 
 			String teamName = idea.getTeamId() == null
 					? null
-					: teamRepository.findById(idea.getTeamId()).map(Team::getName).orElse(null);
+					: teamNames.get(idea.getTeamId());
 
 			summaries.add(new ScoreSummary(idea.getId(), idea.getTitle(), panelScore, communityScore, blendedScore,
 					communityVoterCount, idea.getTeamId(), teamName, 0, judgeCount, idea.getVotes()));

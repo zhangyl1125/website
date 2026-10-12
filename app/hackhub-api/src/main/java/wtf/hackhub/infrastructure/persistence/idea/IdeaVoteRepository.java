@@ -12,6 +12,9 @@ public interface IdeaVoteRepository extends JpaRepository<IdeaVote, UUID> {
 	Optional<IdeaVote> findByIdeaIdAndUserId(UUID ideaId, UUID userId);
 	boolean existsByIdeaIdAndUserId(UUID ideaId, UUID userId);
 	long countByIdeaId(UUID ideaId);
+
+	@Query("SELECT v.ideaId FROM IdeaVote v WHERE v.userId = :userId AND v.ideaId IN :ideaIds")
+	List<UUID> findVotedIdeaIds(UUID userId, List<UUID> ideaIds);
 	List<IdeaVote> findAllByUserId(UUID userId);
 
 	@Query(value = """

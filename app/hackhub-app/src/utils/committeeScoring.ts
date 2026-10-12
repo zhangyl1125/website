@@ -1,6 +1,7 @@
 import type { JudgeScore, ScoreSummary } from '../services/judgingService'
 import type { VotingCriteria } from '../services/votingService'
 import { IdeaService } from '../services/ideaService'
+import { getAllPages } from '../services/pagination'
 
 export function officialCriteria(criteria: VotingCriteria[]): boolean {
   return criteria.length === 2
@@ -9,10 +10,7 @@ export function officialCriteria(criteria: VotingCriteria[]): boolean {
 }
 
 export async function loadAllNominations(hackathonId: string) {
-  const first = await IdeaService.getIdeas(hackathonId, 0, 100)
-  const remaining = await Promise.all(Array.from({ length: Math.max(0, first.totalPages - 1) }, (_, index) =>
-    IdeaService.getIdeas(hackathonId, index + 1, 100)))
-  return [...first.content, ...remaining.flatMap((page) => page.content)]
+  return getAllPages((page) => IdeaService.getIdeas(hackathonId, page, 100))
 }
 
 export function rankCommitteeScores(scores: ScoreSummary[]) {

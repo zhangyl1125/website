@@ -49,8 +49,9 @@ public class IdeaController {
 	@GetMapping("/api/v1/hackathons/{hackathonId}/ideas")
 	public Page<IdeaResponse> listByHackathon(@PathVariable UUID hackathonId, Pageable pageable,
 			@AuthenticationPrincipal UUID userId) {
-		return getIdeasUseCase.listByHackathon(hackathonId, pageable)
-				.map(idea -> response(idea, getIdeasUseCase.hasVoted(idea.getId(), userId)));
+		var ideas = getIdeasUseCase.listByHackathon(hackathonId, pageable);
+		var votedIds = getIdeasUseCase.votedIdeaIds(ideas.getContent().stream().map(Idea::getId).toList(), userId);
+		return ideas.map(idea -> response(idea, votedIds.contains(idea.getId())));
 	}
 
 	@Operation(summary = "Submit a new idea to a hackathon")

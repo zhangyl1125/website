@@ -24,6 +24,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.any;
 
 @ExtendWith(MockitoExtension.class)
 class GetJudgeScoresUseCaseTest {
@@ -43,6 +46,14 @@ class GetJudgeScoresUseCaseTest {
 	wtf.hackhub.infrastructure.persistence.idea.VotingCriteriaRepository criteriaRepository;
 	@InjectMocks
 	GetJudgeScoresUseCase useCase;
+
+	private IdeaScoreRepository.CommunitySummary community(UUID id, int voters, String score) {
+		return new IdeaScoreRepository.CommunitySummary() {
+			public UUID getIdeaId() { return id; }
+			public int getVoterCount() { return voters; }
+			public BigDecimal getWeightedScore() { return new BigDecimal(score); }
+		};
+	}
 
 	private Hackathon hackathon(Hackathon.JudgingMode mode, int panelWeight) {
 		Hackathon h = new Hackathon("H", "D", Instant.now(), Instant.now().plusSeconds(86400), "KEY", 4, 100,
@@ -119,9 +130,8 @@ class GetJudgeScoresUseCaseTest {
 				.thenReturn(Optional.of(hackathon(Hackathon.JudgingMode.PANEL, 100)));
 		when(ideaRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(idea));
 		when(judgeScoreRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(judgeScore));
-		when(ideaScoreRepository.countDistinctVoters(ideaId)).thenReturn(0);
-		when(ideaScoreRepository.calculateWeightedScore(ideaId, hackathonId)).thenReturn(BigDecimal.ZERO);
-		when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+		org.springframework.test.util.ReflectionTestUtils.setField(team, "id", teamId);
+		when(teamRepository.findAllById(List.of(teamId))).thenReturn(List.of(team));
 
 		List<GetJudgeScoresUseCase.ScoreSummary> result = useCase.getSummary(hackathonId);
 		assertThat(result).hasSize(1);
@@ -140,8 +150,7 @@ class GetJudgeScoresUseCaseTest {
 				.thenReturn(Optional.of(hackathon(Hackathon.JudgingMode.COMMUNITY, 0)));
 		when(ideaRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(idea));
 		when(judgeScoreRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of());
-		when(ideaScoreRepository.countDistinctVoters(ideaId)).thenReturn(5);
-		when(ideaScoreRepository.calculateWeightedScore(ideaId, hackathonId)).thenReturn(new BigDecimal("7.50"));
+		when(ideaScoreRepository.summarizeByHackathon(hackathonId)).thenReturn(List.of(community(ideaId, 5, "7.50")));
 
 		List<GetJudgeScoresUseCase.ScoreSummary> result = useCase.getSummary(hackathonId);
 		assertThat(result).hasSize(1);
@@ -160,8 +169,7 @@ class GetJudgeScoresUseCaseTest {
 				.thenReturn(Optional.of(hackathon(Hackathon.JudgingMode.BLENDED, 70)));
 		when(ideaRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(idea));
 		when(judgeScoreRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(judgeScore));
-		when(ideaScoreRepository.countDistinctVoters(ideaId)).thenReturn(3);
-		when(ideaScoreRepository.calculateWeightedScore(ideaId, hackathonId)).thenReturn(new BigDecimal("6.00"));
+		when(ideaScoreRepository.summarizeByHackathon(hackathonId)).thenReturn(List.of(community(ideaId, 3, "6.00")));
 
 		List<GetJudgeScoresUseCase.ScoreSummary> result = useCase.getSummary(hackathonId);
 		assertThat(result).hasSize(1);
@@ -183,15 +191,15 @@ class GetJudgeScoresUseCaseTest {
 				.thenReturn(Optional.of(hackathon(Hackathon.JudgingMode.PANEL, 100)));
 		when(ideaRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(idea2, idea1));
 		when(judgeScoreRepository.findAllByHackathonId(hackathonId)).thenReturn(List.of(high, low));
-		when(ideaScoreRepository.countDistinctVoters(id1)).thenReturn(0);
-		when(ideaScoreRepository.countDistinctVoters(id2)).thenReturn(0);
-		when(ideaScoreRepository.calculateWeightedScore(id1, hackathonId)).thenReturn(BigDecimal.ZERO);
-		when(ideaScoreRepository.calculateWeightedScore(id2, hackathonId)).thenReturn(BigDecimal.ZERO);
 
 		List<GetJudgeScoresUseCase.ScoreSummary> result = useCase.getSummary(hackathonId);
 		assertThat(result).hasSize(2);
 		assertThat(result.get(0).rank()).isEqualTo(1);
 		assertThat(result.get(0).blendedScore()).isGreaterThan(result.get(1).blendedScore());
+		verify(ideaScoreRepository).summarizeByHackathon(hackathonId);
+		verify(ideaScoreRepository, never()).countDistinctVoters(any());
+		verify(ideaScoreRepository, never()).calculateWeightedScore(any(), any());
+		verify(teamRepository, never()).findById(any());
 	}
 	@Test
 	void panel_uses_70_30_weights_and_excludes_incomplete_judges() {

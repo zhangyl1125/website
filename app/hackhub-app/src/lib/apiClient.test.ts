@@ -136,4 +136,25 @@ describe('api client', () => {
     await expect(api.post('/api/v1/me/votes', { ideaIds: ['nominee-1'] })).rejects.toMatchObject({ status: 401 })
     expect(tokenStore.hasToken()).toBe(false)
   })
+
+  it('shares one refresh when several protected requests expire together', async () => {
+    tokenStore.setAccessToken('expired-test-token')
+    let finishRefresh!: () => void
+    const refreshGate = new Promise<void>((resolve) => { finishRefresh = resolve })
+    fetchMock.mockImplementation(async (path: string, options: RequestInit) => {
+      if (path.endsWith('/auth/refresh')) {
+        await refreshGate
+        return jsonResponse({ accessToken: 'refreshed-test-token' })
+      }
+      const headers = options.headers as Record<string, string>
+      return headers.Authorization === 'Bearer refreshed-test-token'
+        ? jsonResponse({ ok: true }) : emptyResponse(401)
+    })
+    const requests = Promise.all([api.get('/api/v1/first'), api.get('/api/v1/second')])
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path.endsWith('/auth/refresh'))).toBe(true))
+    finishRefresh()
+    expect(await requests).toEqual([{ ok: true }, { ok: true }])
+    expect(fetchMock.mock.calls.filter(([path]) => path.endsWith('/auth/refresh'))).toHaveLength(1)
+  })
+
 })

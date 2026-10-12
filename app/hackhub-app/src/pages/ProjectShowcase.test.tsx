@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render as renderView, screen, waitFor, within, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MantineProvider } from '@mantine/core'
 import { MemoryRouter } from 'react-router-dom'
@@ -45,6 +47,11 @@ const { createIdea, createTeam, getOrCreateNominationTeam, getComments, addComme
   clearMyVotes: vi.fn().mockResolvedValue(undefined),
   voteIdea: vi.fn().mockResolvedValue({ voted: true, voteCount: 3 }),
 }))
+
+const render = (ui: ReactElement) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
 
 Element.prototype.scrollIntoView = vi.fn()
 Element.prototype.scrollTo = vi.fn()
@@ -134,6 +141,52 @@ describe('ProjectShowcase', () => {
     await screen.findByText('Shared nominee 2')
     expect(ProfileService.getProfile).toHaveBeenCalledTimes(2)
     expect(StorageService.getPresignedUrl).toHaveBeenCalledTimes(2)
+  })
+
+  it('defers offscreen photos, loads nearby photos and allows retry after a failed request', async () => {
+    const originalObserver = globalThis.IntersectionObserver
+    const observers: Array<{ notify: (visible: boolean) => void; disconnect: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal('IntersectionObserver', class {
+      disconnect = vi.fn()
+      observe = vi.fn()
+      constructor(callback: IntersectionObserverCallback) {
+        observers.push({
+          notify: (visible) => callback([{ isIntersecting: visible } as IntersectionObserverEntry], this as unknown as IntersectionObserver),
+          disconnect: this.disconnect,
+        })
+      }
+    })
+    getIdeas.mockResolvedValueOnce({ content: [1, 2].map((id) => ({
+      id: `photo-${id}`, title: `Photo nominee ${id}`, description: 'Photo loading',
+      createdBy: 'creator', category: 'Customer Values', tags: [], attachments: [`/photo-${id}.webp`],
+      projectAttachments: [{ type: 'nomination', name: `Associate ${id}` }],
+      votes: 0, userHasVoted: false, status: 'submitted', createdAt: '', updatedAt: '',
+    })) })
+    const view = render(<MantineProvider><MemoryRouter><ProjectShowcase /></MemoryRouter></MantineProvider>)
+    try {
+      await screen.findByText('Photo nominee 2')
+      expect(screen.queryByRole('img', { name: /Associate .* nomination/ })).not.toBeInTheDocument()
+      act(() => observers[0].notify(false))
+      expect(screen.queryByRole('img', { name: 'Associate 1 nomination' })).not.toBeInTheDocument()
+      act(() => observers[1].notify(true))
+      const image = screen.getByAltText('Associate 2 nomination')
+      expect(image).toHaveAttribute('src', '/photo-2.webp')
+      expect(image).toHaveAttribute('decoding', 'async')
+      expect(screen.queryByAltText('Associate 1 nomination')).not.toBeInTheDocument()
+      fireEvent.error(image)
+      expect(screen.getByText('Photo unavailable')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Retry photo' }))
+      const retried = screen.getByAltText('Associate 2 nomination')
+      expect(retried).not.toBe(image)
+      fireEvent.load(retried)
+      expect(retried).toBeVisible()
+      expect(screen.queryByText('Photo unavailable')).not.toBeInTheDocument()
+      expect(observers[1].disconnect).toHaveBeenCalled()
+    } finally {
+      view.unmount()
+      vi.stubGlobal('IntersectionObserver', originalObserver)
+    }
+    expect(observers[0].disconnect).toHaveBeenCalled()
   })
 
   it('uses nomination metadata without requesting an unused creator profile', async () => {
@@ -242,6 +295,10 @@ describe('ProjectShowcase', () => {
     const records = await screen.findByRole('dialog', { name: 'My voting records' }, { timeout: 2500 })
     expect(await within(records).findByText('Customer Portal Renewal')).toBeInTheDocument()
     expect(submitVotes).toHaveBeenCalledExactlyOnceWith(['idea-1'])
+    await waitFor(() => expect(getIdeas).toHaveBeenCalledTimes(2))
+    expect(getHackathons).toHaveBeenCalledTimes(1)
+    expect(TeamService.getTeams).toHaveBeenCalledTimes(1)
+    expect(ProfileService.getProfile).toHaveBeenCalledTimes(1)
     expect(within(records).getByRole('status')).toHaveTextContent('saved to the database')
     await userEvent.click(within(records).getByRole('button', { name: 'Back to nominees' }))
     await userEvent.click(await screen.findByRole('button', { name: 'My votes (0)' }))
@@ -432,7 +489,7 @@ describe('ProjectShowcase', () => {
     }
   })
 
-  it('submits an individual nomination in a draft award without creating a team' , async () => {
+  it.each(['image/webp', 'image/png'])('submits a cropped %s photo in a draft award without creating a team', async (outputType) => {
     currentUser.role = 'admin'
     getHackathons.mockResolvedValueOnce({ content: [{ id: 'hackathon-1', title: '2026 Award', status: 'draft' }] })
     const user = userEvent.setup()
@@ -457,6 +514,23 @@ describe('ProjectShowcase', () => {
     expect(screen.getByRole('button', { name: 'Submit nomination' })).toBeDisabled()
     expect(uploadFile).not.toHaveBeenCalled()
     await user.upload(fileInput!, new File(['image'], 'project.png', { type: 'image/png' }))
+    const cropImage = await screen.findByRole('img', { name: 'Photo to crop' })
+    Object.defineProperties(cropImage, { naturalWidth: { value: 1200 }, naturalHeight: { value: 1600 } })
+    const drawImage = vi.fn()
+    const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob')
+      .mockImplementation((callback) => callback(new Blob(['cropped image'], { type: outputType })))
+    try {
+      fireEvent.load(cropImage)
+      await user.click(screen.getByRole('button', { name: 'Confirm crop' }))
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm crop' })).not.toBeInTheDocument())
+      expect(drawImage).toHaveBeenCalled()
+      expect(toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/webp', 0.85)
+    } finally {
+      context.mockRestore()
+      toBlob.mockRestore()
+    }
     expect(screen.queryByText('Photo exceeds 50 MB. Please choose a smaller photo.')).not.toBeInTheDocument()
     const tagsInput = screen.getByRole('textbox', { name: /Tags you want to add/ })
     await user.type(tagsInput, 'Customer、Innovation，Collaboration, Impact、Digital、Sixth、')
@@ -471,7 +545,7 @@ describe('ProjectShowcase', () => {
     expect(getOrCreateNominationTeam).not.toHaveBeenCalled()
     expect(createTeam).not.toHaveBeenCalled()
     expect(createIdea.mock.calls[0][0]).not.toHaveProperty('teamId')
-    expect(uploadFile).toHaveBeenCalledWith(expect.any(File), 'project-attachments', 'nominations/hackathon-1/user-1')
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ type: outputType, name: `project-cropped.${outputType === 'image/webp' ? 'webp' : 'png'}` }), 'project-attachments', 'nominations/hackathon-1/user-1')
     expect(createIdea).toHaveBeenCalledWith(expect.objectContaining({
       hackathonId: 'hackathon-1',
       category: 'Customer Values',
@@ -553,4 +627,21 @@ describe('Nominee deletion', () => {
     await waitFor(() => expect(screen.queryByText('Customer Portal Renewal')).not.toBeInTheDocument())
     expect(deleteIdea).toHaveBeenCalledTimes(2)
   })
+})
+
+it('renders nomination text and voting controls before a slow photo URL resolves', async () => {
+  let resolvePhoto!: (url: string) => void
+  vi.mocked(StorageService.getPresignedUrl).mockImplementationOnce(() => new Promise((resolve) => { resolvePhoto = resolve }))
+  getIdeas.mockResolvedValueOnce({ content: [{
+    id: 'slow-photo', title: 'Slow photo nominee', description: 'Ready to vote', createdBy: 'creator',
+    category: 'Customer Values', tags: [], attachments: [],
+    projectAttachments: [{ type: 'nomination', name: 'Associate' }, { type: 'screenshot', storageKey: 'slow', url: '/fallback.jpg' }],
+    votes: 0, userHasVoted: false, status: 'submitted', createdAt: '', updatedAt: '',
+  }] })
+  render(<MantineProvider env="test"><MemoryRouter><ProjectShowcase /></MemoryRouter></MantineProvider>)
+  expect(await screen.findByText('Slow photo nominee')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Vote, 0 votes' })).toBeEnabled()
+  expect(screen.queryByAltText('Associate nomination')).not.toBeInTheDocument()
+  await act(async () => resolvePhoto('/resolved.jpg'))
+  await waitFor(() => expect(screen.getByAltText('Associate nomination')).toHaveAttribute('src', '/resolved.jpg'))
 })
