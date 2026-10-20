@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { LoadingOverlay } from '@mantine/core'
-import { lazy, Suspense, useEffect, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { useAuthStore } from './store/authStore'
 import { RealtimeProvider } from './contexts/RealtimeContext'
 import { DigitalPioneerOverview } from './pages/DigitalPioneerOverview'
@@ -9,7 +9,17 @@ import { useAwardAccess } from './hooks/useAwardAccess'
 import { loginDestination } from './lib/loginDestination'
 import { HackathonAccess } from './components/HackathonAccess'
 
-const AwardManagement = lazy(() => import('./pages/AwardManagement').then((module) => ({ default: module.AwardManagement })))
+let preloadedAwardManagement: ComponentType | undefined
+const loadAwardManagement = () => import('./pages/AwardManagement').then((module) => {
+  preloadedAwardManagement = module.AwardManagement
+  return { default: module.AwardManagement }
+})
+const LazyAwardManagement = lazy(loadAwardManagement)
+function AwardManagement() {
+  // An already downloaded page can mount without another Suspense fallback.
+  const [Page] = useState(() => preloadedAwardManagement ?? LazyAwardManagement)
+  return <Page />
+}
 const CreateHackathon = lazy(() => import('./pages/CreateHackathon'))
 const HackathonEdit = lazy(() => import('./pages/HackathonEdit').then((module) => ({ default: module.HackathonEdit })))
 const ProjectShowcase = lazy(() => import('./pages/ProjectShowcase').then((module) => ({ default: module.ProjectShowcase })))
@@ -43,6 +53,13 @@ function App() {
       initialize()
     }
   }, [initialized, initialize])
+
+  // Download the award page alongside session restoration; access checks still gate rendering.
+  useEffect(() => {
+    if (/^\/(awards(?:\/[^/]+)?|committee|hackathons)$/.test(location.pathname)) {
+      void loadAwardManagement().catch(() => { /* The lazy route handles import failures when rendered. */ })
+    }
+  }, [location.pathname])
 
   // Keep the login form mounted while submitting so failed attempts retain their input.
   if (!initialized || (loading && location.pathname !== '/login')) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { Alert, Badge, Button, Card, Container, Group, Modal, TextInput, Select, Stack, Table, Text, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -77,44 +77,51 @@ export function AwardManagement() {
   const [deleteError, setDeleteError] = useState('')
   const { user } = useAuthStore()
   const { language } = useLanguage()
-  const [campaigns, setCampaigns] = useState<Hackathon[]>([])
-  const [judges, setJudges] = useState<HackathonJudge[]>([])
+  const queryClient = useQueryClient()
   const [membersOpened, setMembersOpened] = useState(false)
   const [invitee, setInvitee] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const isAdmin = user?.role === 'admin'
   const canManage = user?.role === 'admin' || user?.role === 'manager'
+  const campaignsKey = ['award-management-campaigns', user?.id, user?.role]
+  const campaignsQuery = useQuery({
+    queryKey: campaignsKey,
+    enabled: Boolean(user),
+    // Show cached campaigns immediately, while checking for newly created or changed awards.
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    retry: false,
+    queryFn: async () => {
+      const [campaigns, assignedIds] = await Promise.all([
+        getAllPages((page) => HackathonService.getHackathons(page, 100)),
+        canManage ? Promise.resolve(null) : api.get<string[]>('/api/v1/profiles/me/judge-assignments'),
+      ])
+      const assigned = new Set(assignedIds ?? [])
+      return campaigns.filter((item) => canManage || assigned.has(item.id))
+    },
+  })
+  const campaigns = !canManage && campaignsQuery.error ? [] : campaignsQuery.data ?? []
+  const loading = campaignsQuery.isPending
+  const error = campaignsQuery.error?.message
   const visibleCampaigns = campaigns.filter((item) => `${item.title} ${item.description ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()))
   const campaign = campaigns.find((item) => item.id === id)
-
-  useEffect(() => {
-    let active = true
-    const load = async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const [campaigns, assignedIds] = await Promise.all([
-          getAllPages((page) => HackathonService.getHackathons(page, 100)),
-          canManage ? Promise.resolve(null) : api.get<string[]>('/api/v1/profiles/me/judge-assignments'),
-        ])
-        const assigned = new Set(assignedIds ?? [])
-        const judges = canManage && id && campaigns.some((item) => item.id === id)
-          ? await JudgingService.getJudges(id)
-          : []
-        if (!active) return
-        setCampaigns(campaigns.filter((item) => canManage || assigned.has(item.id)))
-        setJudges(judges)
-      } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load award campaigns.')
-      } finally {
-        if (active) setLoading(false)
-      }
-    }
-    void load()
-    return () => { active = false }
-  }, [id, user?.id, canManage])
+  const judgesKey = ['hackathon-judges', id, user?.id, user?.role]
+  const { data: judges = [], isPending: judgesLoading, error: judgesError } = useQuery({
+    queryKey: judgesKey,
+    queryFn: () => JudgingService.getJudges(id!),
+    enabled: Boolean(canManage && campaign),
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+  const setCampaigns = async (update: (current: Hackathon[]) => Hackathon[]) => {
+    await queryClient.cancelQueries({ queryKey: campaignsKey })
+    queryClient.setQueryData<Hackathon[]>(campaignsKey, (current = []) => update(current))
+  }
+  const setJudges = async (update: (current: HackathonJudge[]) => HackathonJudge[]) => {
+    await queryClient.cancelQueries({ queryKey: judgesKey })
+    queryClient.setQueryData<HackathonJudge[]>(judgesKey, (current = []) => update(current))
+  }
 
   const { data: members = [], error: membersError } = useQuery({
     queryKey: ['committee-member-options', user?.id, user?.role],
@@ -153,7 +160,7 @@ export function AwardManagement() {
     setDeleteError('')
     try {
       await HackathonService.deleteHackathon(deleteTarget.id)
-      setCampaigns((current) => current.filter((item) => item.id !== deleteTarget.id))
+      await setCampaigns((current) => current.filter((item) => item.id !== deleteTarget.id))
       setDeleteTarget(null)
       if (id === deleteTarget.id) navigate('/awards')
       notifications.show({ title: 'Deleted', message: 'Award campaign deleted.', color: 'green' })
@@ -191,7 +198,7 @@ export function AwardManagement() {
                   data={[{ value: 'draft', label: 'Draft' }, { value: 'open', label: 'Open' }, { value: 'running', label: 'Running' }, { value: 'completed', label: 'Completed' }].map((option) => ({ ...option, label: language === 'zh' ? translateUiText(option.label) : option.label }))}
                   onChange={(value) => { if (value) void mutate(async () => {
                     const updated = await HackathonService.transitionStatus(item.id, value as Hackathon['status'])
-                    setCampaigns((current) => current.map((item) => item.id === updated.id ? updated : item))
+                    await setCampaigns((current) => current.map((item) => item.id === updated.id ? updated : item))
                   }) }} />}
               </Card>
               {canManage && <AwardVotingResults hackathonId={item.id} />}
@@ -211,7 +218,7 @@ export function AwardManagement() {
                 data={[{ value: 'draft', label: 'Draft' }, { value: 'open', label: 'Open' }, { value: 'running', label: 'Running' }, { value: 'completed', label: 'Completed' }].map((option) => ({ ...option, label: language === 'zh' ? translateUiText(option.label) : option.label }))}
                 onChange={(value) => { if (value) void mutate(async () => {
                   const updated = await HackathonService.transitionStatus(campaign.id, value as Hackathon['status'])
-                  setCampaigns((current) => current.map((item) => item.id === updated.id ? updated : item))
+                  await setCampaigns((current) => current.map((item) => item.id === updated.id ? updated : item))
                 }) }} />}
             </Card>
             {canManage && <AwardVotingResults key={campaign.id} hackathonId={campaign.id} />}
@@ -219,13 +226,14 @@ export function AwardManagement() {
               <Title order={3}>Committee members</Title>
               <Stack mt="md">
                 {membersError && <Alert color="red">Unable to load associates for committee assignment. Refresh to retry.</Alert>}
+                {judgesError ? <Alert color="red">{judgesError.message}</Alert> : judgesLoading && <Text role="status">Loading committee members…</Text>}
                 {judges.map((judge) => <Group key={judge.id} justify="space-between">
                   <Text>{judge.name ?? judge.userId} · {judge.email}</Text>
-                  <Button size="sm" variant="subtle" color="red" disabled={busy} onClick={() => void mutate(async () => { await JudgingService.removeJudge(campaign.id, judge.userId); setJudges((current) => current.filter((item) => item.userId !== judge.userId)) })}>Remove</Button>
+                  <Button size="sm" variant="subtle" color="red" disabled={busy} onClick={() => void mutate(async () => { await JudgingService.removeJudge(campaign.id, judge.userId); await setJudges((current) => current.filter((item) => item.userId !== judge.userId)) })}>Remove</Button>
                 </Group>)}
-                {!judges.length && <Text c="white">No committee members assigned yet.</Text>}
-                <Select size="md" label="Assign an associate" searchable onDropdownOpen={() => setMembersOpened(true)} value={invitee} onChange={setInvitee} data={members.filter((member) => !judges.some((judge) => judge.userId === member.value))} />
-                <Button w="fit-content" loading={busy} disabled={!invitee} onClick={() => void mutate(async () => { if (!invitee) return; const added = await JudgingService.inviteJudge(campaign.id, invitee); setJudges((current) => [...current, added]); setInvitee(null) })}>Assign committee member</Button>
+                {!judgesLoading && !judgesError && !judges.length && <Text c="white">No committee members assigned yet.</Text>}
+                <Select size="md" label="Assign an associate" searchable disabled={judgesLoading || !!judgesError} onDropdownOpen={() => setMembersOpened(true)} value={invitee} onChange={setInvitee} data={members.filter((member) => !judges.some((judge) => judge.userId === member.value))} />
+                <Button w="fit-content" loading={busy} disabled={!invitee || judgesLoading || !!judgesError} onClick={() => void mutate(async () => { if (!invitee) return; const added = await JudgingService.inviteJudge(campaign.id, invitee); await setJudges((current) => [...current, added]); setInvitee(null) })}>Assign committee member</Button>
               </Stack>
             </Card>}
             {canManage && <VotingCriteriaManager hackathonId={campaign.id} isManager />}
