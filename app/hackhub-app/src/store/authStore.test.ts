@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { tokenStore } from '../lib/tokenStore'
 import { useAuthStore } from './authStore'
 
@@ -39,6 +39,8 @@ describe('authStore', () => {
     tokenStore.clear()
     vi.clearAllMocks()
   })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   // ── login ──────────────────────────────────────────────────────────────────
 
@@ -168,6 +170,49 @@ describe('authStore', () => {
   // ── initialize ─────────────────────────────────────────────────────────────
 
   describe('initialize', () => {
+    it('restores a recent session from its cookie without interactive sign-in', async () => {
+      const fetch = vi.fn().mockResolvedValue(Response.json({ accessToken: 'test-restored-access' }))
+      vi.stubGlobal('fetch', fetch)
+      mockApi.get.mockResolvedValueOnce(PROFILE)
+      await useAuthStore.getState().initialize()
+      expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/auth/refresh', {
+        method: 'POST', credentials: 'include',
+      })
+      expect(useAuthStore.getState().user?.id).toBe(PROFILE.id)
+      expect(mockApi.post).not.toHaveBeenCalled()
+    })
+
+    it('does not refresh the same cookie twice during concurrent initialization', async () => {
+      const fetch = vi.fn().mockResolvedValue(Response.json({ accessToken: 'test-restored-access' }))
+      vi.stubGlobal('fetch', fetch)
+      mockApi.get.mockResolvedValue(PROFILE)
+      await Promise.all([
+        useAuthStore.getState().initialize(),
+        useAuthStore.getState().initialize(),
+      ])
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(mockApi.get).toHaveBeenCalledTimes(1)
+      expect(useAuthStore.getState().user?.id).toBe(PROFILE.id)
+    })
+
+    it('does not reinitialize an already checked session', async () => {
+      const fetch = vi.fn().mockResolvedValue({ ok: false })
+      vi.stubGlobal('fetch', fetch)
+      await useAuthStore.getState().initialize()
+      await useAuthStore.getState().initialize()
+      expect(fetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('handles expiry even after the first visit had no valid cookie', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+      await useAuthStore.getState().initialize()
+      useAuthStore.setState({ user: { ...PROFILE, role: 'participant' } })
+      tokenStore.setAccessToken('test-expired-access')
+      window.dispatchEvent(new Event('auth:session-expired'))
+      expect(useAuthStore.getState().user).toBeNull()
+      expect(tokenStore.hasToken()).toBe(false)
+    })
+
     it('restores session when token already in memory', async () => {
       tokenStore.setAccessToken('existing-jwt')
       mockApi.get.mockResolvedValueOnce(PROFILE)
@@ -178,7 +223,7 @@ describe('authStore', () => {
     })
 
     it('sets initialized without user when no token and refresh fails', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({ ok: false })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ ok: false }))
       await useAuthStore.getState().initialize()
       expect(useAuthStore.getState().user).toBeNull()
       expect(useAuthStore.getState().initialized).toBe(true)

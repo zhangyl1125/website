@@ -17,10 +17,17 @@ function renderLogin(url = '/login') {
 }
 
 describe('CompanyLogin', () => {
+  it('waits for the options response without starting sign-in automatically', () => {
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+    renderLogin()
+    expect(screen.getByRole('button', { name: '正在检查公司登录' })).toBeDisabled()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
   it('starts company login and preserves an internal destination', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ enabled: true })))
     renderLogin('/login?redirect=%2Fnominate')
-    expect(await screen.findByRole('link', { name: '公司账号登录' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Bosch 单点登录' })).toHaveAttribute(
       'href', '/api/v1/auth/oidc/authorize/bosch?redirect=%2Fnominate'
     )
   })
@@ -28,7 +35,7 @@ describe('CompanyLogin', () => {
   it('rejects an external return destination', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ enabled: true })))
     renderLogin('/login?redirect=https://example.invalid')
-    expect(await screen.findByRole('link', { name: '公司账号登录' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Bosch 单点登录' })).toHaveAttribute(
       'href', '/api/v1/auth/oidc/authorize/bosch?redirect=%2Foverview'
     )
   })
@@ -37,15 +44,15 @@ describe('CompanyLogin', () => {
     const json = vi.fn().mockResolvedValue({ enabled })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json }))
     renderLogin()
-    await waitFor(() => expect(json).toHaveBeenCalled())
+    expect(await screen.findByRole('alert')).toHaveTextContent('公司登录暂不可用')
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
-  it('keeps SSO hidden when the options request fails', async () => {
+  it('shows an explanation when the options request fails', async () => {
     const fetch = vi.fn().mockRejectedValue(new Error('unavailable'))
     vi.stubGlobal('fetch', fetch)
     renderLogin()
-    await waitFor(() => expect(fetch).toHaveBeenCalled())
+    expect(await screen.findByRole('alert')).toHaveTextContent('公司登录暂不可用')
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 

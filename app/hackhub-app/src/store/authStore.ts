@@ -62,13 +62,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialized: false,
 
   initialize: async () => {
+    // React remounts must not rotate the same refresh cookie concurrently.
+    if (get().initialized || get().loading) return
+    window.addEventListener('auth:session-expired', handleSessionExpired)
     set({ loading: true })
     try {
       // Try to restore session via refresh token cookie (httpOnly — automatic)
       if (!tokenStore.hasToken()) {
         const refreshed = await tryRefreshSilently()
         if (!refreshed) {
-          set({ initialized: true, loading: false })
+          set({ user: null })
           return
         }
       }
@@ -76,14 +79,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: mapUser(profile) })
     } catch {
       tokenStore.clear()
+      set({ user: null })
     } finally {
       set({ initialized: true, loading: false })
     }
-
-    // Listen for session expiry events emitted by apiClient
-    window.addEventListener('auth:session-expired', () => {
-      set({ user: null })
-    })
   },
 
   login: async (email: string, password: string) => {
@@ -148,6 +147,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setUser: (user) => set({ user }),
   setLoading: (loading) => set({ loading }),
 }))
+
+function handleSessionExpired() {
+  tokenStore.clear()
+  useAuthStore.setState({ user: null })
+}
 
 async function tryRefreshSilently(): Promise<boolean> {
   try {

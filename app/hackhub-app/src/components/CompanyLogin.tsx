@@ -6,7 +6,7 @@ import { loginDestination } from '../lib/loginDestination'
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
 
 export function CompanyLogin({ chinese }: { chinese: boolean }) {
-  const [enabled, setEnabled] = useState(false)
+  const [status, setStatus] = useState<'loading' | 'enabled' | 'unavailable'>('loading')
   const { search } = useLocation()
   const error = new URLSearchParams(search).get('sso_error')
 
@@ -15,13 +15,13 @@ export function CompanyLogin({ chinese }: { chinese: boolean }) {
     void fetch(`${apiBaseUrl}/api/v1/auth/sso`, { signal: controller.signal, cache: 'no-store' })
       .then(async (response) => response.ok ? response.json() : null)
       .then((options) => {
-        if (!controller.signal.aborted) setEnabled(options?.enabled === true)
+        if (!controller.signal.aborted) setStatus(options?.enabled === true ? 'enabled' : 'unavailable')
       })
-      .catch(() => { /* Password login remains available when SSO is unavailable. */ })
+      .catch(() => {
+        if (!controller.signal.aborted) setStatus('unavailable')
+      })
     return () => controller.abort()
   }, [])
-
-  if (!enabled && !error) return null
 
   const messages: Record<string, string> = {
     account_not_linked: chinese ? '公司账号尚未关联已有网站账号，请联系网站管理员完成关联。'
@@ -36,16 +36,31 @@ export function CompanyLogin({ chinese }: { chinese: boolean }) {
       : 'Company sign-in was not completed. Please retry or ask your administrator to check approval and access.')
 
   return (
-    <Stack mb="lg">
+    <Stack gap="md">
       {error && <Alert color="red" role="alert">{message}</Alert>}
-      {enabled && (
+      {status === 'loading' && (
+        <Button fullWidth size="sm" h={40} color="#007bc0" radius={0} loading disabled aria-label={chinese ? '正在检查公司登录' : 'Checking company sign-in'}>
+          {chinese ? 'Bosch 单点登录' : 'Bosch Single-Sign-On'}
+        </Button>
+      )}
+      {status === 'unavailable' && !error && (
+        <Alert color="blue" radius={0} role="alert">
+          {chinese ? '公司登录暂不可用，请稍后刷新重试或联系网站管理员。'
+            : 'Company sign-in is currently unavailable. Please refresh to try again or contact the portal administrator.'}
+        </Alert>
+      )}
+      {status === 'enabled' && (
         <Button
           component="a"
           href={`${apiBaseUrl}/api/v1/auth/oidc/authorize/bosch?redirect=${encodeURIComponent(loginDestination(search))}`}
           fullWidth
-          size="md"
+          size="sm"
+          h={40}
+          fw={600}
+          color="#007bc0"
+          radius={0}
         >
-          {chinese ? '公司账号登录' : 'Sign in with Bosch'}
+          {chinese ? 'Bosch 单点登录' : 'Bosch Single-Sign-On'}
         </Button>
       )}
     </Stack>
