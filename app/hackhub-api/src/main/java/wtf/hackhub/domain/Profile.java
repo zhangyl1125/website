@@ -19,7 +19,7 @@ public class Profile {
 	@Column(nullable = false)
 	private String name;
 
-	@Column(name = "password_hash", nullable = false)
+	@Column(name = "password_hash")
 	private String passwordHash;
 
 	@Column(name = "avatar_url")

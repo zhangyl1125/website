@@ -38,10 +38,19 @@ public class LoginUseCase {
 	public TokenPair execute(String email, String password) {
 		Profile profile = profileRepository.findByEmail(email).orElseThrow(InvalidCredentialsException::new);
 
-		if (!passwordEncoder.matches(password, profile.getPasswordHash())) {
+		if (profile.getPasswordHash() == null || !passwordEncoder.matches(password, profile.getPasswordHash())) {
 			throw new InvalidCredentialsException();
 		}
 
+		return issueForAuthenticatedProfile(profile);
+	}
+
+	/**
+	 * Only call after password verification or a validated, explicitly bound SSO
+	 * identity.
+	 */
+	@Transactional
+	public TokenPair issueForAuthenticatedProfile(Profile profile) {
 		String accessToken = jwtProvider.issueAccessToken(profile);
 		String rawRefreshToken = generateSecureToken();
 		String tokenHash = sha256(rawRefreshToken);

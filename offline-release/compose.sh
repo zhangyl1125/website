@@ -5,4 +5,8 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
   echo 'Create .env and images.env in this directory first.' >&2
   exit 1
 }
-exec docker compose --env-file .env --env-file images.env -f compose.yml "$@"
+compose_files=(-f compose.yml)
+if [[ -f compose.sso.yml ]]; then
+  compose_files+=(-f compose.sso.yml)
+fi
+exec docker compose --env-file .env --env-file images.env "${compose_files[@]}" "$@"

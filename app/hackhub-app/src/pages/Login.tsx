@@ -24,6 +24,7 @@ import { useAuthStore } from '../store/authStore'
 import { notifications } from '@mantine/notifications'
 import { useLanguage } from '../contexts/LanguageContext'
 import { loginDestination } from '../lib/loginDestination'
+import { CompanyLogin } from '../components/CompanyLogin'
 
 const rememberedEmailKey = 'digital-award:remembered-email:v1'
 
@@ -122,6 +123,8 @@ export function Login() {
         <Text c="dimmed" size="sm" ta="center" mt={5} mb="xl">
           Sign in to the Digital Pioneer Award portal
         </Text>
+
+        <CompanyLogin chinese={language === 'zh'} />
 
         <form onSubmit={form.onSubmit(handleSubmit)} autoComplete="on">
           <Stack>

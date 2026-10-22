@@ -15,6 +15,8 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
 
 	boolean existsByEmail(String email);
 
+	boolean existsByEmailIgnoreCase(String email);
+
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("SELECT p FROM Profile p WHERE p.id = :id")
 	Optional<Profile> findByIdForUpdate(UUID id);

@@ -89,6 +89,11 @@ services:
       JWT_REFRESH_TOKEN_EXPIRY: 604800
       # This Compose stack is served over HTTP. Set true when deploying behind HTTPS.
       APP_AUTH_COOKIE_SECURE: ${APP_AUTH_COOKIE_SECURE:-false}
+      APP_SSO_ENABLED: ${APP_SSO_ENABLED:-false}
+      APP_SSO_TENANT_ID: ${APP_SSO_TENANT_ID:-}
+      APP_SSO_CLIENT_ID: ${APP_SSO_CLIENT_ID:-}
+      APP_SSO_CLIENT_SECRET: ${APP_SSO_CLIENT_SECRET:-}
+      APP_SSO_PUBLIC_BASE_URL: ${APP_SSO_PUBLIC_BASE_URL:-}
       # JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be provided via .env or environment
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}

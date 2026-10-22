@@ -44,8 +44,9 @@ public class SecurityConfig {
 		return http.csrf(AbstractHttpConfigurer::disable)
 				.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 				.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-				.authorizeHttpRequests(auth -> auth.requestMatchers(HttpMethod.POST, "/api/v1/auth/register")
-						.permitAll().requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+				.authorizeHttpRequests(auth -> auth.requestMatchers(HttpMethod.GET, "/api/v1/auth/sso").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll().requestMatchers("/ws/**")
 						.permitAll() // STOMP handshake
 						.requestMatchers("/actuator/health").permitAll() // Load balancer probe
